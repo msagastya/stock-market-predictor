@@ -1,0 +1,23 @@
+// Quick integration file - add these sections where indicated in page.tsx
+
+{/* After patterns section, add Fundamentals */}
+{fundamentals && (
+  <div className="mb-6">
+    <Fundamentals
+      marketCap={fundamentals.marketCap}
+      peRatio={fundamentals.peRatio}
+      eps={fundamentals.eps}
+      beta={fundamentals.beta}
+      fiftyTwoWeekHigh={fundamentals.fiftyTwoWeekHigh}
+      fiftyTwoWeekLow={fundamentals.fiftyTwoWeekLow}
+      avgVolume={fundamentals.avgVolume}
+      currentPrice={currentPrice}
+    />
+  </div>
+)}
+
+{/* Add Watchlist and Portfolio in a side column or at the end */}
+<div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+  <Watchlist onSelectStock={handleSelectStock} />
+  <Portfolio />
+</div>
