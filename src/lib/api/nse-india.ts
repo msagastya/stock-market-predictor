@@ -206,8 +206,23 @@ export async function getNifty50Holdings(): Promise<Array<{ symbol: string; weig
         const data = await nseGet('/api/equity-stockIndices?index=NIFTY%2050');
         return (data.data || []).map((d: any) => ({
             symbol: d.symbol + '.NS',
-            weight: d.perChange365d ?? 0, // NSE doesn't give weight directly in this endpoint
+            weight: d.perChange365d ?? 0,
         }));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Fetch full constituent data for any NSE index.
+ * Returns the raw NSE row objects (rich data: price, change, 30d%, 365d%, nearWKH, nearWKL, volume, ffmc, meta).
+ * Available indices: 'NIFTY 50', 'NIFTY 500', 'NIFTY BANK', 'SECURITIES IN F&O', etc.
+ */
+export async function fetchNSEIndexData(indexName: string): Promise<any[]> {
+    try {
+        const encoded = encodeURIComponent(indexName);
+        const data = await nseGet(`/api/equity-stockIndices?index=${encoded}`);
+        return data.data || [];
     } catch {
         return [];
     }

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { MarketOverview } from '@/features/market/components/MarketOverview';
+import PredictiveMovers from '@/components/PredictiveMovers';
 
 export default function Home() {
   const router = useRouter();
@@ -67,6 +68,8 @@ export default function Home() {
           router.push(`/research/${encodeURIComponent(symbol)}?name=${encodeURIComponent(name)}`);
         }}
       />
+
+      <PredictiveMovers />
 
       <section className="grid gap-6 lg:grid-cols-3">
         <PreviewCard
