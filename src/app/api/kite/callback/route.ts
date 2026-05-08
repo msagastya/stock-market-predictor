@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSession, isKiteConfigured } from '@/lib/api/kite-connect';
-import fs from 'fs';
-import path from 'path';
+import { firestoreSet } from '@/lib/firebase-store';
 
-// After login Zerodha redirects here with ?request_token=xxx&action=login&status=success
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
     const requestToken = params.get('request_token');
@@ -21,19 +21,15 @@ export async function GET(request: NextRequest) {
         const session = await generateSession(requestToken);
         const accessToken = session.access_token;
 
-        // Persist access token into .env.local so it survives server restarts
-        const envPath = path.join(process.cwd(), '.env.local');
-        let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
+        // Store in Firestore so it persists across serverless instances
+        await firestoreSet('config', 'kite', {
+            access_token: accessToken,
+            user_name: session.user_name,
+            user_id: session.user_id,
+            updated_at: new Date().toISOString(),
+        });
 
-        if (envContent.includes('KITE_ACCESS_TOKEN=')) {
-            envContent = envContent.replace(/^KITE_ACCESS_TOKEN=.*/m, `KITE_ACCESS_TOKEN=${accessToken}`);
-        } else {
-            envContent += `\nKITE_ACCESS_TOKEN=${accessToken}\n`;
-        }
-
-        fs.writeFileSync(envPath, envContent);
-
-        // Also set in process.env for the current process (no restart needed)
+        // Also set in process.env for this request lifecycle
         process.env.KITE_ACCESS_TOKEN = accessToken;
 
         return NextResponse.redirect(new URL(`/zerodha?success=1&user=${encodeURIComponent(session.user_name)}`, request.url));

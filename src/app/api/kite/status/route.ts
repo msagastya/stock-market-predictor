@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { KITE_API_KEY, getAccessToken, isKiteConfigured, hasKiteCredentials, getLoginURL, getKiteProfile } from '@/lib/api/kite-connect';
+import { isKiteConfigured, hasKiteCredentialsAsync, getLoginURL, getKiteProfile, getAccessTokenAsync } from '@/lib/api/kite-connect';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     const configured = isKiteConfigured();
-    const authenticated = hasKiteCredentials();
 
     if (!configured) {
         return NextResponse.json({
@@ -14,6 +13,8 @@ export async function GET() {
         });
     }
 
+    const authenticated = await hasKiteCredentialsAsync();
+
     if (!authenticated) {
         return NextResponse.json({
             status: 'not_authenticated',
@@ -21,6 +22,10 @@ export async function GET() {
             message: 'Click loginUrl to authenticate with Zerodha',
         });
     }
+
+    // Set token in process.env for this request
+    const token = await getAccessTokenAsync();
+    process.env.KITE_ACCESS_TOKEN = token;
 
     try {
         const profile = await getKiteProfile();

@@ -1,6 +1,7 @@
 // Zerodha Kite Connect v3 — personal account integration
 import crypto from 'crypto';
 import { cachedFetch } from './cache-manager';
+import { firestoreGet } from '@/lib/firebase-store';
 import { Stock } from '@/types';
 
 const KITE_BASE = 'https://api.kite.trade';
@@ -9,14 +10,29 @@ const KITE_LOGIN = 'https://kite.zerodha.com/connect/login';
 export const KITE_API_KEY = process.env.KITE_API_KEY || '';
 const KITE_API_SECRET = process.env.KITE_API_SECRET || '';
 
-// Access token is stored in env at runtime (set after login)
-// In production persist this in a DB or encrypted file; for personal use env is fine
+// Reads token from process.env first, then Firestore (for Vercel serverless)
+export async function getAccessTokenAsync(): Promise<string> {
+    if (process.env.KITE_ACCESS_TOKEN) return process.env.KITE_ACCESS_TOKEN;
+    try {
+        const doc = await firestoreGet('config', 'kite');
+        const token = doc?.access_token || '';
+        if (token) process.env.KITE_ACCESS_TOKEN = token; // cache in process for this instance
+        return token;
+    } catch {
+        return '';
+    }
+}
+
 export function getAccessToken(): string {
     return process.env.KITE_ACCESS_TOKEN || '';
 }
 
 export function hasKiteCredentials(): boolean {
     return Boolean(KITE_API_KEY && getAccessToken());
+}
+
+export async function hasKiteCredentialsAsync(): Promise<boolean> {
+    return Boolean(KITE_API_KEY && await getAccessTokenAsync());
 }
 
 export function isKiteConfigured(): boolean {
