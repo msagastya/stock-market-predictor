@@ -1,0 +1,57 @@
+name: Autonomous Trading
+
+on:
+  schedule:
+    # 9:15 AM IST = 3:45 AM UTC, Monday-Friday
+    - cron: '45 3 * * 1-5'
+    # 3:15 PM IST = 9:45 AM UTC, Monday-Friday (intraday exit)
+    - cron: '45 9 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to run'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - trade
+          - exit
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine action
+        id: action
+        run: |
+          HOUR=$(date -u +%H)
+          MINUTE=$(date -u +%M)
+          INPUT="${{ github.event.inputs.action }}"
+
+          if [ "$INPUT" = "preview" ]; then
+            echo "endpoint=/api/trading/run" >> $GITHUB_OUTPUT
+            echo "method=GET" >> $GITHUB_OUTPUT
+          elif [ "$INPUT" = "exit" ]; then
+            echo "endpoint=/api/trading/intraday-exit" >> $GITHUB_OUTPUT
+            echo "method=POST" >> $GITHUB_OUTPUT
+          elif [ "$INPUT" = "trade" ]; then
+            echo "endpoint=/api/trading/run" >> $GITHUB_OUTPUT
+            echo "method=POST" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" = "03" ]; then
+            echo "endpoint=/api/trading/run" >> $GITHUB_OUTPUT
+            echo "method=POST" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" = "09" ]; then
+            echo "endpoint=/api/trading/intraday-exit" >> $GITHUB_OUTPUT
+            echo "method=POST" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run trading action
+        run: |
+          RESPONSE=$(curl -s -X ${{ steps.action.outputs.method }} \
+            -H "x-trading-secret: ${{ secrets.TRADING_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "${{ secrets.VERCEL_APP_URL }}${{ steps.action.outputs.endpoint }}")
+          echo "Response: $RESPONSE"
+          echo "$RESPONSE" | python3 -m json.tool || true
