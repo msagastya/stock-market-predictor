@@ -297,7 +297,7 @@ export default function ZerodhaPage() {
             }
             setLoading(false);
         })();
-    }, []);
+    }, [loadStatus, loadGTTs, loadPortfolio, loadOrders]); // eslint-disable-line react-hooks/exhaustive-deps
 
     async function deleteGTT(id: number) {
         if (!confirm(`Delete GTT #${id}?`)) return;

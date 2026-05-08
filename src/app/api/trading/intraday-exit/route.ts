@@ -27,12 +27,12 @@ export async function POST(req: NextRequest) {
             const side = pos.quantity > 0 ? 'SELL' : 'BUY';
             const qty = Math.abs(pos.quantity);
             try {
+                const suffix = pos.exchange === 'BSE' ? '.BO' : '.NS';
                 const order = await placeOrder({
-                    exchange: pos.exchange,
-                    tradingsymbol: pos.tradingsymbol,
-                    transaction_type: side,
+                    symbol: pos.tradingsymbol + suffix,
+                    transactionType: side as 'BUY' | 'SELL',
                     quantity: qty,
-                    order_type: 'MARKET',
+                    orderType: 'MARKET',
                     product: 'MIS',
                 });
                 results.push({ symbol: pos.tradingsymbol, status: 'exited', orderId: order.order_id });

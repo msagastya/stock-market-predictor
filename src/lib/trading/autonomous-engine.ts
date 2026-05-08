@@ -199,12 +199,11 @@ export async function executeTrades(candidates: TradeCandidate[]): Promise<Tradi
             const tradingSymbol = c.symbol.replace('.NS', '');
 
             const orderParams = {
-                exchange,
-                tradingsymbol: tradingSymbol,
-                transaction_type: 'BUY',
+                symbol: c.symbol,
+                transactionType: 'BUY' as const,
                 quantity: c.quantity,
-                order_type: 'MARKET',
-                product: c.tradeType === 'intraday' ? 'MIS' : 'CNC',
+                orderType: 'MARKET' as const,
+                product: (c.tradeType === 'intraday' ? 'MIS' : 'CNC') as 'MIS' | 'CNC',
             };
 
             const orderResult = await placeOrder(orderParams);

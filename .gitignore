@@ -7,3 +7,4 @@ node_modules
 *.backup
 tsconfig.tsbuildinfo
 dev_server_logs.txt
+.vercel
