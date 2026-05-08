@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { KITE_API_KEY, getAccessToken, isKiteConfigured, hasKiteCredentials, getLoginURL, getKiteProfile } from '@/lib/api/kite-connect';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
     const configured = isKiteConfigured();
     const authenticated = hasKiteCredentials();
@@ -8,7 +10,7 @@ export async function GET() {
     if (!configured) {
         return NextResponse.json({
             status: 'not_configured',
-            message: 'KITE_API_KEY and KITE_API_SECRET not set in .env.local',
+            message: 'KITE_API_KEY and KITE_API_SECRET not set in environment variables',
         });
     }
 
