@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -249,7 +249,7 @@ function CreateGTTForm({ onCreated }: { onCreated: () => void }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function ZerodhaPage() {
+function ZerodhaPageInner() {
     const searchParams = useSearchParams();
     const [kiteStatus, setKiteStatus] = useState<KiteStatus | null>(null);
     const [gtts, setGTTs] = useState<GTT[]>([]);
@@ -470,5 +470,13 @@ export default function ZerodhaPage() {
                 <div className="text-slate-500 text-sm">Loading…</div>
             )}
         </div>
+    );
+}
+
+export default function ZerodhaPage() {
+    return (
+        <Suspense fallback={<div className="p-8 text-slate-400">Loading…</div>}>
+            <ZerodhaPageInner />
+        </Suspense>
     );
 }
