@@ -65,6 +65,8 @@ export async function generateSession(requestToken: string): Promise<{
         checksum,
     });
 
+    console.log('[kite] generateSession api_key:', KITE_API_KEY, 'secret_len:', KITE_API_SECRET.length, 'checksum:', checksum);
+
     const res = await fetch(`${KITE_BASE}/session/token`, {
         method: 'POST',
         headers: { 'X-Kite-Version': '3', 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -72,6 +74,7 @@ export async function generateSession(requestToken: string): Promise<{
     });
 
     const data = await res.json();
+    console.log('[kite] session response:', JSON.stringify(data));
     if (data.status !== 'success') throw new Error(data.message || 'Session generation failed');
     return data.data;
 }
