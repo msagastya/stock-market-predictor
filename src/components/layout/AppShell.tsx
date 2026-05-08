@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/watchlist', label: 'Watchlist' },
   { href: '/portfolio', label: 'Portfolio' },
   { href: '/alerts', label: 'Alerts' },
+  { href: '/zerodha', label: 'Zerodha' },
   { href: '/research/%5ENSEI?name=Nifty%2050', label: 'Research' },
 ];
 
