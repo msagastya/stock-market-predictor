@@ -81,7 +81,7 @@ export async function searchMarketInstruments(query: string): Promise<Stock[]> {
     ...(yahooResults.status === 'fulfilled' ? yahooResults.value : []),
     ...(fallbackResults.status === 'fulfilled' ? fallbackResults.value : []),
     ...(fundResults.status === 'fulfilled' ? mapFundsToSearchResults(fundResults.value) : []),
-  ]);
+  ] as Stock[]);
 
   return merged
     .sort((a, b) => scoreResult(b, trimmed) - scoreResult(a, trimmed))
