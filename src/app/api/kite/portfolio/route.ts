@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getHoldings, getPositions, getKiteMargins, hasKiteCredentials } from '@/lib/api/kite-connect';
+import { getHoldings, getPositions, getKiteMargins, hasKiteCredentialsAsync, getAccessTokenAsync } from '@/lib/api/kite-connect';
 
 export async function GET() {
-    if (!hasKiteCredentials()) {
+    const t = await getAccessTokenAsync();
+    if (t) process.env.KITE_ACCESS_TOKEN = t;
+    if (!await hasKiteCredentialsAsync()) {
         return NextResponse.json({ error: 'Kite not authenticated' }, { status: 401 });
     }
     try {

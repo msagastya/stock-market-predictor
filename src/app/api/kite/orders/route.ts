@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOrders, getTrades, placeOrder, cancelOrder, hasKiteCredentials } from '@/lib/api/kite-connect';
+import { getOrders, getTrades, placeOrder, cancelOrder, hasKiteCredentialsAsync, getAccessTokenAsync } from '@/lib/api/kite-connect';
+
+async function loadToken() {
+    const t = await getAccessTokenAsync();
+    if (t) process.env.KITE_ACCESS_TOKEN = t;
+}
 
 function notAuth() {
     return NextResponse.json({ error: 'Kite not authenticated' }, { status: 401 });
 }
 
-// GET /api/kite/orders?type=orders|trades
 export async function GET(req: NextRequest) {
-    if (!hasKiteCredentials()) return notAuth();
+    await loadToken();
+    if (!await hasKiteCredentialsAsync()) return notAuth();
     const type = req.nextUrl.searchParams.get('type') || 'orders';
     try {
         const data = type === 'trades' ? await getTrades() : await getOrders();
@@ -17,9 +22,9 @@ export async function GET(req: NextRequest) {
     }
 }
 
-// POST /api/kite/orders — place order
 export async function POST(req: NextRequest) {
-    if (!hasKiteCredentials()) return notAuth();
+    await loadToken();
+    if (!await hasKiteCredentialsAsync()) return notAuth();
     try {
         const body = await req.json();
         const result = await placeOrder(body);
@@ -29,9 +34,9 @@ export async function POST(req: NextRequest) {
     }
 }
 
-// DELETE /api/kite/orders?order_id=xxx
 export async function DELETE(req: NextRequest) {
-    if (!hasKiteCredentials()) return notAuth();
+    await loadToken();
+    if (!await hasKiteCredentialsAsync()) return notAuth();
     const orderId = req.nextUrl.searchParams.get('order_id');
     if (!orderId) return NextResponse.json({ error: 'order_id required' }, { status: 400 });
     try {

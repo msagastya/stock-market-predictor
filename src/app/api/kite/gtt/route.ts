@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
     getGTTs, createSingleGTT, createOCOGTT, deleteGTT, modifyGTT, getGTT,
-    hasKiteCredentials,
+    hasKiteCredentials, hasKiteCredentialsAsync, getAccessTokenAsync,
 } from '@/lib/api/kite-connect';
+
+async function loadToken() {
+    const t = await getAccessTokenAsync();
+    if (t) process.env.KITE_ACCESS_TOKEN = t;
+}
 
 function notAuth() {
     return NextResponse.json({ error: 'Kite not authenticated' }, { status: 401 });
@@ -10,7 +15,8 @@ function notAuth() {
 
 // GET /api/kite/gtt — list all GTTs
 export async function GET() {
-    if (!hasKiteCredentials()) return notAuth();
+    await loadToken();
+    if (!await hasKiteCredentialsAsync()) return notAuth();
     try {
         const gtts = await getGTTs();
         return NextResponse.json({ gtts });
@@ -23,7 +29,8 @@ export async function GET() {
 // body: { type: 'single'|'oco', symbol, lastPrice, triggerPrice, orderPrice, quantity, transactionType, product? }
 //    or { type: 'oco', symbol, lastPrice, stopLossPrice, targetPrice, quantity, product? }
 export async function POST(req: NextRequest) {
-    if (!hasKiteCredentials()) return notAuth();
+    await loadToken();
+    if (!await hasKiteCredentialsAsync()) return notAuth();
     try {
         const body = await req.json();
         const { type, symbol, lastPrice, quantity, product } = body;
@@ -55,7 +62,8 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/kite/gtt?id=12345
 export async function DELETE(req: NextRequest) {
-    if (!hasKiteCredentials()) return notAuth();
+    await loadToken();
+    if (!await hasKiteCredentialsAsync()) return notAuth();
     const id = Number(req.nextUrl.searchParams.get('id'));
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
     try {
@@ -68,7 +76,8 @@ export async function DELETE(req: NextRequest) {
 
 // PATCH /api/kite/gtt — modify GTT
 export async function PATCH(req: NextRequest) {
-    if (!hasKiteCredentials()) return notAuth();
+    await loadToken();
+    if (!await hasKiteCredentialsAsync()) return notAuth();
     try {
         const body = await req.json();
         const { id, lastPrice, ...rest } = body;
