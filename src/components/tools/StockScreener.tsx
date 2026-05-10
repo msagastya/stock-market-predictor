@@ -214,9 +214,9 @@ export default function StockScreener() {
                                         <div className="text-xs text-muted-foreground">{stock.name}</div>
                                     </div>
                                     <div className="text-right">
-                                        <div className="font-medium">₹{stock.price.toFixed(2)}</div>
-                                        <div className={`text-xs ${stock.change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                            {stock.change >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                                        <div className="font-medium">{stock.price ? `₹${stock.price.toFixed(2)}` : '—'}</div>
+                                        <div className={`text-xs ${(stock.change ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                            {stock.changePercent != null ? `${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%` : '—'}
                                         </div>
                                     </div>
                                 </div>
