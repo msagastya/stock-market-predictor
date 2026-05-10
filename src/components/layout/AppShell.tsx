@@ -3,16 +3,15 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import SearchBar from '@/components/ui/SearchBar';
-import { classNames } from '@/lib/utils/format';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Market' },
-  { href: '/screener', label: 'Screener' },
-  { href: '/watchlist', label: 'Watchlist' },
-  { href: '/portfolio', label: 'Portfolio' },
-  { href: '/alerts', label: 'Alerts' },
-  { href: '/zerodha', label: 'Zerodha' },
-  { href: '/research/%5ENSEI?name=Nifty%2050', label: 'Research' },
+  { href: '/', label: 'Market', icon: '▦' },
+  { href: '/screener', label: 'Screener', icon: '⊞' },
+  { href: '/watchlist', label: 'Watchlist', icon: '☆' },
+  { href: '/portfolio', label: 'Portfolio', icon: '◈' },
+  { href: '/alerts', label: 'Alerts', icon: '◎' },
+  { href: '/zerodha', label: 'Zerodha', icon: '⟡' },
+  { href: '/research/%5ENSEI?name=Nifty%2050', label: 'Research', icon: '◇' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -23,90 +22,134 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.push(`/research/${encodeURIComponent(symbol)}?name=${encodeURIComponent(name)}`);
   };
 
+  const isActive = (href: string) =>
+    href === '/' ? pathname === '/' : pathname.startsWith(href.split('?')[0]);
+
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(29,78,216,0.18),_transparent_28%),linear-gradient(180deg,_#0b1220_0%,_#0f172a_42%,_#020617_100%)] text-slate-100">
-      <div className="mx-auto flex min-h-screen max-w-[1600px]">
-        <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-slate-950/70 p-6 backdrop-blur xl:block">
-          <Link href="/" className="block">
-            <div className="text-xs uppercase tracking-[0.35em] text-blue-300">Investor OS</div>
-            <div className="mt-3 text-2xl font-semibold text-white">Stock Market Predictor</div>
-            <p className="mt-3 text-sm leading-relaxed text-slate-400">
-              Market terminal, research desk, and portfolio workspace in one shell.
-            </p>
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
+
+      {/* Sidebar */}
+      <aside style={{
+        width: 220,
+        minHeight: '100vh',
+        background: 'var(--surface)',
+        borderRight: '1px solid var(--border)',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '24px 0',
+        position: 'sticky',
+        top: 0,
+        height: '100vh',
+        flexShrink: 0,
+      }}
+        className="hidden xl:flex"
+      >
+        {/* Logo */}
+        <div style={{ padding: '0 20px 24px', borderBottom: '1px solid var(--border)' }}>
+          <Link href="/" style={{ textDecoration: 'none' }}>
+            <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>
+              Investor OS
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.02em' }}>
+              Market Predictor
+            </div>
+          </Link>
+        </div>
+
+        {/* Nav */}
+        <nav style={{ padding: '16px 12px', flex: 1 }}>
+          {NAV_ITEMS.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '9px 12px',
+                  borderRadius: 6,
+                  marginBottom: 2,
+                  textDecoration: 'none',
+                  fontSize: 13,
+                  fontWeight: active ? 500 : 400,
+                  color: active ? 'var(--text)' : 'var(--text2)',
+                  background: active ? 'var(--surface2)' : 'transparent',
+                  transition: 'all 0.1s',
+                  borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
+                }}
+              >
+                <span style={{ fontSize: 14, opacity: 0.7 }}>{item.icon}</span>
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Footer */}
+        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text3)' }}>NSE · BSE · AMFI · Zerodha</div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>Real-time Indian markets</div>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+
+        {/* Top bar */}
+        <header style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 40,
+          background: 'rgba(10,10,10,0.95)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid var(--border)',
+          padding: '12px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+        }}>
+          {/* Mobile logo */}
+          <Link href="/" style={{ textDecoration: 'none', flexShrink: 0 }} className="xl:hidden">
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Market Predictor</span>
           </Link>
 
-          <nav className="mt-10 space-y-2">
-            {NAV_ITEMS.map((item) => {
-              const active = item.href === '/'
-                ? pathname === '/'
-                : pathname.startsWith(item.href.split('?')[0]);
+          {/* Search */}
+          <div style={{ flex: 1, maxWidth: 480 }}>
+            <SearchBar onSelectStock={handleSelectStock} />
+          </div>
 
+          {/* Mobile nav */}
+          <nav style={{ display: 'flex', gap: 4, overflowX: 'auto' }} className="xl:hidden">
+            {NAV_ITEMS.map((item) => {
+              const active = isActive(item.href);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={classNames(
-                    'block rounded-xl px-4 py-3 text-sm transition-colors',
-                    active
-                      ? 'bg-blue-500/15 text-white ring-1 ring-blue-400/40'
-                      : 'text-slate-400 hover:bg-white/5 hover:text-white'
-                  )}
+                  style={{
+                    whiteSpace: 'nowrap',
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: active ? 500 : 400,
+                    color: active ? 'var(--text)' : 'var(--text2)',
+                    background: active ? 'var(--surface2)' : 'transparent',
+                    textDecoration: 'none',
+                  }}
                 >
                   {item.label}
                 </Link>
               );
             })}
           </nav>
+        </header>
 
-          <div className="mt-10 rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="text-xs uppercase tracking-widest text-slate-500">Build Status</div>
-            <div className="mt-3 text-lg font-semibold">Foundation In Progress</div>
-            <p className="mt-2 text-sm text-slate-400">
-              Shell, research routes, portfolio pages, and real data wiring are live. Auth and persistence are next.
-            </p>
-          </div>
-        </aside>
-
-        <div className="flex min-h-screen flex-1 flex-col">
-          <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/70 backdrop-blur">
-            <div className="flex flex-col gap-4 px-4 py-4 lg:px-8">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.3em] text-slate-500">Workspace</div>
-                  <div className="mt-1 text-xl font-semibold text-white">Market Intelligence Platform</div>
-                </div>
-                <div className="w-full max-w-2xl">
-                  <SearchBar onSelectStock={handleSelectStock} />
-                </div>
-              </div>
-
-              <div className="flex gap-2 overflow-x-auto xl:hidden">
-                {NAV_ITEMS.map((item) => {
-                  const active = item.href === '/'
-                    ? pathname === '/'
-                    : pathname.startsWith(item.href.split('?')[0]);
-
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={classNames(
-                        'whitespace-nowrap rounded-full px-4 py-2 text-sm transition-colors',
-                        active
-                          ? 'bg-blue-500/15 text-white ring-1 ring-blue-400/40'
-                          : 'bg-white/5 text-slate-400 hover:text-white'
-                      )}
-                    >
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          </header>
-
-          <main className="flex-1 px-4 py-6 lg:px-8">{children}</main>
-        </div>
+        {/* Page content */}
+        <main style={{ flex: 1, padding: '24px', maxWidth: 1400, width: '100%', margin: '0 auto' }}>
+          {children}
+        </main>
       </div>
     </div>
   );

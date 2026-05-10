@@ -1,23 +1,19 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { DM_Sans, DM_Mono } from "next/font/google";
 import { AppShell } from '@/components/layout/AppShell';
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const dmSans = DM_Sans({ subsets: ["latin"], weight: ['300', '400', '500', '600'] });
 
 export const metadata: Metadata = {
-    title: "Stock & Mutual Fund Analyzer - Free Trading Analysis",
-    description: "Professional stock and mutual fund analysis with technical indicators, candlestick patterns, and AI-powered recommendations. 100% free, no API keys required.",
+    title: "Market Predictor — Indian Stock Intelligence",
+    description: "Professional stock market analysis for Indian equities. NSE, BSE, AMFI data with Zerodha integration and autonomous trading.",
 };
 
-export default function RootLayout({
-    children,
-}: {
-    children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
-        <html lang="en" className="dark">
-            <body className={inter.className}>
+        <html lang="en">
+            <body className={dmSans.className}>
                 <AppShell>{children}</AppShell>
             </body>
         </html>

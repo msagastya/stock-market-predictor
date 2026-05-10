@@ -15,83 +15,99 @@ export default function SearchBar({ onSelectStock }: SearchBarProps) {
     const [showResults, setShowResults] = useState(false);
 
     const searchStocks = useMemo(
-        () =>
-            debounce(async (searchQuery: string) => {
-                if (searchQuery.trim().length < 2) {
-                    setResults([]);
-                    setShowResults(false);
-                    return;
-                }
-
-                setIsSearching(true);
-                try {
-                    const response = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-                    const data = await response.json();
-                    setResults(data.results || []);
-                    setShowResults(true);
-                } catch (error) {
-                    console.error('Search error:', error);
-                    setResults([]);
-                    setShowResults(true);
-                } finally {
-                    setIsSearching(false);
-                }
-            }, 300),
-        []
+        () => debounce(async (searchQuery: string) => {
+            if (searchQuery.trim().length < 2) { setResults([]); setShowResults(false); return; }
+            setIsSearching(true);
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+                const data = await res.json();
+                setResults(data.results || []);
+                setShowResults(true);
+            } catch { setResults([]); setShowResults(true); }
+            finally { setIsSearching(false); }
+        }, 300), []
     );
 
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value;
-        setQuery(value);
-        searchStocks(value);
-    };
-
-    const handleSelectStock = (stock: Stock) => {
-        setQuery('');
-        setResults([]);
-        setShowResults(false);
+    const handleSelect = (stock: Stock) => {
+        setQuery(''); setResults([]); setShowResults(false);
         onSelectStock(stock.symbol, stock.name);
     };
 
     return (
-        <div className="relative w-full max-w-2xl">
-            <div className="relative">
+        <div style={{ position: 'relative', width: '100%' }}>
+            <div style={{ position: 'relative' }}>
                 <input
                     type="text"
                     value={query}
-                    onChange={handleInputChange}
+                    onChange={e => { setQuery(e.target.value); searchStocks(e.target.value); }}
                     onFocus={() => results.length > 0 && setShowResults(true)}
-                    placeholder="Search NSE, BSE, AMFI, Yahoo, or Kite-backed symbols..."
-                    className="input w-full pr-10"
+                    onBlur={() => setTimeout(() => setShowResults(false), 150)}
+                    placeholder="Search stocks, indices, mutual funds..."
+                    style={{
+                        width: '100%',
+                        padding: '8px 36px 8px 12px',
+                        background: 'var(--surface2)',
+                        border: '1px solid var(--border2)',
+                        borderRadius: 6,
+                        color: 'var(--text)',
+                        fontSize: 13,
+                        fontFamily: 'DM Sans, sans-serif',
+                        outline: 'none',
+                    }}
+                    onFocusCapture={e => (e.target as HTMLInputElement).style.borderColor = 'var(--accent)'}
+                    onBlurCapture={e => (e.target as HTMLInputElement).style.borderColor = 'var(--border2)'}
                 />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    {isSearching ? (
-                        <div className="animate-spin h-5 w-5 border-2 border-primary border-t-transparent rounded-full"></div>
-                    ) : (
-                        <span className="text-muted-foreground">🔍</span>
-                    )}
+                <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)', fontSize: 12 }}>
+                    {isSearching
+                        ? <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        : '⌕'
+                    }
                 </div>
             </div>
 
             {showResults && results.length > 0 && (
-                <div className="absolute z-50 w-full mt-2 glass-strong rounded-lg shadow-2xl max-h-96 overflow-y-auto">
+                <div style={{
+                    position: 'absolute',
+                    zIndex: 100,
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    marginTop: 4,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border2)',
+                    borderRadius: 8,
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                    maxHeight: 360,
+                    overflowY: 'auto',
+                }}>
                     {results.map((stock, idx) => (
                         <button
                             key={idx}
-                            onClick={() => handleSelectStock(stock)}
-                            className="w-full px-4 py-3 text-left hover:bg-accent transition-colors border-b border-border last:border-b-0 first:rounded-t-lg last:rounded-b-lg"
+                            onMouseDown={() => handleSelect(stock)}
+                            style={{
+                                width: '100%',
+                                padding: '10px 14px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                background: 'transparent',
+                                border: 'none',
+                                borderBottom: idx < results.length - 1 ? '1px solid var(--border)' : 'none',
+                                cursor: 'pointer',
+                                fontFamily: 'DM Sans, sans-serif',
+                                textAlign: 'left',
+                                transition: 'background 0.1s',
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface2)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                         >
-                            <div className="flex justify-between items-center">
-                                    <div>
-                                        <div className="font-semibold">{stock.symbol}</div>
-                                        <div className="text-sm text-muted-foreground truncate">{stock.name}</div>
-                                    </div>
-                                <div className="text-right">
-                                    <div className="text-xs text-muted-foreground">{stock.exchange}</div>
-                                    <div className="text-[10px] uppercase tracking-wider text-slate-500">
-                                        {stock.provider || 'live'} {stock.assetType ? `• ${stock.assetType}` : ''}
-                                    </div>
-                                </div>
+                            <div>
+                                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{stock.symbol}</div>
+                                <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 1 }}>{stock.name}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: 11, color: 'var(--text3)' }}>{stock.exchange}</div>
+                                {stock.assetType && <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 1 }}>{stock.assetType}</div>}
                             </div>
                         </button>
                     ))}
@@ -99,8 +115,12 @@ export default function SearchBar({ onSelectStock }: SearchBarProps) {
             )}
 
             {showResults && !isSearching && query.trim().length >= 2 && results.length === 0 && (
-                <div className="absolute z-50 w-full mt-2 glass-strong rounded-lg shadow-2xl p-4 text-center text-muted-foreground">
-                    No results found for &quot;{query}&quot;
+                <div style={{
+                    position: 'absolute', zIndex: 100, top: '100%', left: 0, right: 0, marginTop: 4,
+                    background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 8,
+                    padding: '16px', textAlign: 'center', fontSize: 13, color: 'var(--text2)',
+                }}>
+                    No results for &ldquo;{query}&rdquo;
                 </div>
             )}
         </div>
