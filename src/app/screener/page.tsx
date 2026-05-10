@@ -1,22 +1,18 @@
+'use client';
+
 import StockScreener from '@/components/tools/StockScreener';
-import { PageHero } from '@/components/layout/PageHero';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 export default function ScreenerPage() {
   return (
-    <div className="space-y-8">
-      <PageHero
-        eyebrow="Screener"
-        title="Idea discovery should feel fast, selective, and intentional."
-        description="Use a cleaner screening surface to search for opportunities, apply practical boundaries, and move the strongest ideas into deeper research."
-        metrics={[
-          { label: 'Engine', value: 'Search-Led' },
-          { label: 'Focus', value: 'India + Global' },
-          { label: 'Output', value: 'Research Candidates' },
-        ]}
-      />
-
-      <StockScreener />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Screener</div>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.02em' }}>Stock Discovery</h1>
+      </div>
+      <ErrorBoundary>
+        <StockScreener />
+      </ErrorBoundary>
     </div>
   );
 }
-// force rebuild Sun May 10 12:13:02 IST 2026

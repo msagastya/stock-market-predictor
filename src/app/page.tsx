@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { MarketOverview } from '@/features/market/components/MarketOverview';
 import PredictiveMovers from '@/components/PredictiveMovers';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const QUICK_LINKS = [
   { symbol: '^NSEI', name: 'Nifty 50' },
@@ -64,12 +65,16 @@ export default function Home() {
       </div>
 
       {/* Market overview */}
-      <MarketOverview
-        onSelectStock={(symbol, name) => router.push(`/research/${encodeURIComponent(symbol)}?name=${encodeURIComponent(name)}`)}
-      />
+      <ErrorBoundary>
+        <MarketOverview
+          onSelectStock={(symbol, name) => router.push(`/research/${encodeURIComponent(symbol)}?name=${encodeURIComponent(name)}`)}
+        />
+      </ErrorBoundary>
 
       {/* Predictive movers */}
-      <PredictiveMovers />
+      <ErrorBoundary>
+        <PredictiveMovers />
+      </ErrorBoundary>
 
       {/* Bottom cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
