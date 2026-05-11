@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { WATCHLIST, RISK_PROFILES, analyzeStock, simulateExit, buildDailySummary, fetchCandles, PaperTrade } from '@/lib/trading/paper-engine';
 import { getMarketPhase } from '@/lib/trading/hunt-detector';
 import { firestoreGet, firestoreSet } from '@/lib/firebase-store';
+import { ScoredStock } from '@/lib/trading/morning-scanner';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -62,6 +63,16 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ skipped: true, reason: 'Market closed', phase: phase.phase });
     }
 
+    // Load today's dynamic watchlist from morning scan (fallback to hardcoded)
+    let todayWatchlist = WATCHLIST;
+    try {
+        const scanDoc = await firestoreGet('morning_scan', date);
+        if (scanDoc?.watchlist) {
+            const scored: ScoredStock[] = JSON.parse(scanDoc.watchlist);
+            todayWatchlist = scored.map(s => ({ symbol: s.symbol, nseSymbol: s.nseSymbol, category: s.category as any })) as any;
+        }
+    } catch { /* fallback to hardcoded */ }
+
     // Load today's open trades
     const existingDoc = await firestoreGet('paper_trading', `trades_${date}`);
     let trades: PaperTrade[] = existingDoc ? JSON.parse(existingDoc.trades || '[]') : [];
@@ -75,7 +86,7 @@ export async function POST(req: NextRequest) {
         const updated: PaperTrade[] = [];
         for (const trade of openTrades) {
             try {
-                const sym = WATCHLIST.find((w: { nseSymbol: string }) => w.nseSymbol === trade.symbol);
+                const sym = todayWatchlist.find((w: { nseSymbol: string }) => w.nseSymbol === trade.symbol);
                 if (!sym) { updated.push(trade); continue; }
                 const candles = await fetchCandles(sym.symbol, '15m', 2);
                 if (candles.length === 0) { updated.push(trade); continue; }
@@ -100,7 +111,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Scan each stock
-        for (const stock of WATCHLIST) {
+        for (const stock of todayWatchlist) {
             for (const profile of RISK_PROFILES) {
                 // Skip if profile at max trades
                 const todayTrades = trades.filter(t => t.riskProfile === profile.id && t.date === date);
