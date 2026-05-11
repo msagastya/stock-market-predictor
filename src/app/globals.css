@@ -7,18 +7,18 @@
 :root {
   /* Core palette — deep space */
   --bg: #06060a;
-  --surface: #0e0e16;
-  --surface2: #14141f;
-  --surface3: #1a1a28;
-  --border: #1e1e2e;
-  --border2: #28283c;
-  --border3: #323248;
+  --surface: #0f0f17;
+  --surface2: #161622;
+  --surface3: #1e1e2e;
+  --border: #252538;
+  --border2: #2e2e45;
+  --border3: #3a3a55;
 
-  /* Text */
-  --text: #eeeef5;
-  --text2: #7878a0;
-  --text3: #44445a;
-  --text4: #2a2a40;
+  /* Text — much more readable */
+  --text: #f0f0f8;
+  --text2: #9898c0;
+  --text3: #606084;
+  --text4: #505068;
 
   /* Accent — electric indigo */
   --accent: #818cf8;
@@ -52,7 +52,7 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { font-size: 14px; }
+html { font-size: 16px; }
 
 body {
   background: var(--bg);
@@ -114,11 +114,11 @@ h1, h2, h3, h4, h5 {
 .card-content { padding: 16px 20px; }
 
 .card-title {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 
 /* Card with glow on hover */
@@ -135,21 +135,21 @@ h1, h2, h3, h4, h5 {
 
 /* ── Stat blocks ─────────────────────────────── */
 .stat-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--text3);
+  color: var(--text2);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   margin-bottom: 4px;
 }
 .stat-value {
   font-family: 'DM Mono', monospace;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 500;
   color: var(--text);
   letter-spacing: -0.02em;
 }
-.stat-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.stat-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
 
 /* ── Buttons ─────────────────────────────────── */
 .btn {
@@ -232,9 +232,9 @@ select.input { cursor: pointer; }
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 7px;
+  padding: 3px 9px;
   border-radius: 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.02em;
 }
@@ -249,19 +249,19 @@ select.input { cursor: pointer; }
 .badge-info    { background: var(--accent-dim); color: var(--accent); }
 
 /* ── Table ───────────────────────────────────── */
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th {
-  color: var(--text3);
-  font-weight: 500;
+  color: var(--text2);
+  font-weight: 600;
   text-align: left;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 .table td {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   color: var(--text);
 }
@@ -294,9 +294,9 @@ select.input { cursor: pointer; }
   border: 1px solid var(--border);
 }
 .tab {
-  padding: 5px 14px;
+  padding: 7px 16px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   color: var(--text2);
@@ -402,9 +402,9 @@ select.input { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 9px 13px;
   border-radius: 7px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
   color: var(--text2);
   text-decoration: none;
