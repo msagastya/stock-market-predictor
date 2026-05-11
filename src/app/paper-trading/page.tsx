@@ -13,6 +13,17 @@ interface Trade {
     huntSignal: string; confidence: string; patternObservation: string; date: string;
 }
 
+interface ScoredStock {
+    symbol: string; nseSymbol: string; score: number; reasons: string[];
+    category: string; prevClose: number; gapPercent: number; sectorBias: string;
+}
+
+interface MorningScan {
+    date: string; dayBias: string; sectorPriority: string[];
+    watchlist: ScoredStock[]; alerts: string[]; tradingPlan: string;
+    keyLevels: { nifty: number; bankNifty: number; vix: number };
+}
+
 interface Summary {
     date: string; totalTrades: number; winners: number; losers: number; avoided: number;
     grossPnL: number; totalCharges: number; netPnL: number; winRate: number;
@@ -43,24 +54,28 @@ export default function PaperTradingPage() {
     const [trades, setTrades]     = useState<Trade[]>([]);
     const [summary, setSummary]   = useState<Summary | null>(null);
     const [history, setHistory]   = useState<Summary[]>([]);
-    const [tab, setTab]           = useState<'today' | 'history'>('today');
+    const [scan, setScan]         = useState<MorningScan | null>(null);
+    const [tab, setTab]           = useState<'today' | 'watchlist' | 'history'>('today');
     const [loading, setLoading]   = useState(true);
     const [lastRefresh, setLastRefresh] = useState('');
 
     async function load() {
         setLoading(true);
         try {
-            const [tradesRes, summaryRes, historyRes] = await Promise.all([
+            const [tradesRes, summaryRes, historyRes, scanRes] = await Promise.all([
                 fetch(`/api/trading/paper?date=${todayIST()}&type=trades`),
                 fetch(`/api/trading/paper?date=${todayIST()}&type=summary`),
                 fetch(`/api/trading/paper?type=history`),
+                fetch(`/api/trading/morning-scan`),
             ]);
             const t = await tradesRes.json();
             const s = await summaryRes.json();
             const h = await historyRes.json();
+            const sc = await scanRes.json();
             setTrades(t.trades || []);
             setSummary(s.date ? s : null);
             setHistory(h.summaries || []);
+            setScan(sc.date ? sc : null);
             setLastRefresh(new Date().toLocaleTimeString('en-IN'));
         } catch { /* silent */ }
         finally { setLoading(false); }
@@ -115,9 +130,42 @@ export default function PaperTradingPage() {
                 ))}
             </div>
 
+            {/* Morning scan strip */}
+            {scan && (
+                <div className="card" style={{ padding: '14px 18px', borderLeft: '3px solid var(--accent)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                            <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Today's Bias</div>
+                            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 13, fontWeight: 700,
+                                color: scan.dayBias.includes('bullish') || scan.dayBias === 'long_heavy' ? 'var(--green)' : scan.dayBias.includes('bearish') || scan.dayBias === 'short_heavy' ? 'var(--red)' : 'var(--amber)' }}>
+                                {scan.dayBias.replace(/_/g, ' ').toUpperCase()}
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {scan.sectorPriority.map(s => (
+                                <span key={s} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: 'var(--accent)22', color: 'var(--accent)', border: '1px solid var(--accent)44' }}>{s}</span>
+                            ))}
+                        </div>
+                    </div>
+                    {scan.tradingPlan && (
+                        <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 10 }}>{scan.tradingPlan}</div>
+                    )}
+                    {scan.alerts?.length > 0 && (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {scan.alerts.map((a, i) => (
+                                <span key={i} style={{ fontSize: 10, color: 'var(--amber)', background: 'var(--amber)11', border: '1px solid var(--amber)33', padding: '2px 8px', borderRadius: 4 }}>⚠ {a}</span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Tabs */}
             <div className="tab-group" style={{ width: 'fit-content' }}>
                 <button className={`tab ${tab === 'today' ? 'active' : ''}`} onClick={() => setTab('today')}>Today</button>
+                <button className={`tab ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}>
+                    Today's 50 {scan ? `(${scan.dayBias.replace(/_/g,' ')})` : ''}
+                </button>
                 <button className={`tab ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>History ({history.length} days)</button>
             </div>
 
@@ -171,9 +219,47 @@ export default function PaperTradingPage() {
                         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
                             <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 6 }}>No paper trades today yet</div>
                             <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                                Engine runs automatically every 15 min from 9:15 AM IST.<br/>
-                                First entries appear after 9:30 AM when hunt window clears.
+                                Engine runs every minute from 9:10 AM IST.<br/>
+                                First entries appear after 9:30 AM when the hunt window clears.
                             </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {tab === 'watchlist' && (
+                <div>
+                    {!scan ? (
+                        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+                            <div style={{ fontSize: 12, color: 'var(--text3)' }}>Morning scan not run yet. Runs automatically at 7 AM IST on trading days.</div>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                            {scan.watchlist.map((s, i) => (
+                                <div key={s.nseSymbol} style={{
+                                    display: 'flex', alignItems: 'center', gap: 12,
+                                    padding: '10px 14px', background: 'var(--surface)',
+                                    border: '1px solid var(--border)', borderRadius: 8,
+                                }}>
+                                    <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--text3)', width: 20, textAlign: 'right' }}>{i + 1}</div>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div style={{ fontFamily: 'DM Mono, monospace', fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>{s.nseSymbol}</div>
+                                            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 12, fontWeight: 700,
+                                                color: s.score >= 80 ? 'var(--green)' : s.score >= 60 ? 'var(--amber)' : 'var(--text2)' }}>
+                                                {s.score}
+                                            </div>
+                                        </div>
+                                        <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 2 }}>
+                                            {s.category} · {s.sectorBias === 'tailwind' ? '↑ tailwind' : s.sectorBias === 'headwind' ? '↓ headwind' : '→ neutral'}
+                                            {s.gapPercent !== 0 && ` · gap ${s.gapPercent > 0 ? '+' : ''}${s.gapPercent.toFixed(2)}%`}
+                                        </div>
+                                        {s.reasons?.[0] && (
+                                            <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 2, opacity: 0.7 }}>{s.reasons[0]}</div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
