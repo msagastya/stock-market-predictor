@@ -16,6 +16,7 @@ interface Trade {
 interface ScoredStock {
     symbol: string; nseSymbol: string; score: number; reasons: string[];
     category: string; prevClose: number; gapPercent: number; sectorBias: string;
+    volatility?: number; momentum?: number;
 }
 
 interface MorningScan {
@@ -51,13 +52,14 @@ function todayIST() {
 }
 
 export default function PaperTradingPage() {
-    const [trades, setTrades]     = useState<Trade[]>([]);
-    const [summary, setSummary]   = useState<Summary | null>(null);
-    const [history, setHistory]   = useState<Summary[]>([]);
-    const [scan, setScan]         = useState<MorningScan | null>(null);
-    const [tab, setTab]           = useState<'today' | 'watchlist' | 'history'>('today');
-    const [loading, setLoading]   = useState(true);
+    const [trades, setTrades]       = useState<Trade[]>([]);
+    const [summary, setSummary]     = useState<Summary | null>(null);
+    const [history, setHistory]     = useState<Summary[]>([]);
+    const [scan, setScan]           = useState<MorningScan | null>(null);
+    const [tab, setTab]             = useState<'today' | 'watchlist' | 'history'>('today');
+    const [loading, setLoading]     = useState(true);
     const [lastRefresh, setLastRefresh] = useState('');
+    const [expandedStock, setExpandedStock] = useState<string | null>(null);
 
     async function load() {
         setLoading(true);
@@ -231,35 +233,90 @@ export default function PaperTradingPage() {
                 <div>
                     {!scan ? (
                         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-                            <div style={{ fontSize: 12, color: 'var(--text3)' }}>Morning scan not run yet. Runs automatically at 7 AM IST on trading days.</div>
+                            <div style={{ fontSize: 12, color: 'var(--text2)' }}>Morning scan not run yet. Runs automatically at 7 AM IST on trading days.</div>
                         </div>
                     ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
-                            {scan.watchlist.map((s, i) => (
-                                <div key={s.nseSymbol} style={{
-                                    display: 'flex', alignItems: 'center', gap: 12,
-                                    padding: '10px 14px', background: 'var(--surface)',
-                                    border: '1px solid var(--border)', borderRadius: 8,
-                                }}>
-                                    <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 10, color: 'var(--text3)', width: 20, textAlign: 'right' }}>{i + 1}</div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <div style={{ fontFamily: 'DM Mono, monospace', fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>{s.nseSymbol}</div>
-                                            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 12, fontWeight: 700,
-                                                color: s.score >= 80 ? 'var(--green)' : s.score >= 60 ? 'var(--amber)' : 'var(--text2)' }}>
-                                                {s.score}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {scan.watchlist.map((s, i) => {
+                                const isOpen = expandedStock === s.nseSymbol;
+                                const scoreColor = s.score >= 80 ? '#34d399' : s.score >= 60 ? '#fbbf24' : '#94a3b8';
+                                const biasColor = s.sectorBias === 'tailwind' ? '#34d399' : s.sectorBias === 'headwind' ? '#fb7185' : '#94a3b8';
+                                const biasLabel = s.sectorBias === 'tailwind' ? '↑ Tailwind' : s.sectorBias === 'headwind' ? '↓ Headwind' : '→ Neutral';
+                                const gapColor = s.gapPercent > 0 ? '#34d399' : s.gapPercent < 0 ? '#fb7185' : '#94a3b8';
+
+                                return (
+                                    <div key={s.nseSymbol} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                                        {/* Row — always visible */}
+                                        <div
+                                            onClick={() => setExpandedStock(isOpen ? null : s.nseSymbol)}
+                                            style={{
+                                                display: 'grid',
+                                                gridTemplateColumns: '32px 80px 1fr 60px 80px 80px 28px',
+                                                alignItems: 'center',
+                                                gap: 12,
+                                                padding: '12px 16px',
+                                                background: isOpen ? 'var(--surface2)' : 'var(--surface)',
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: '#64748b', textAlign: 'right' }}>{i + 1}</div>
+                                            <div>
+                                                <div style={{ fontFamily: 'DM Mono, monospace', fontWeight: 700, fontSize: 13, color: '#f1f5f9' }}>{s.nseSymbol}</div>
+                                                <div style={{ fontSize: 10, color: '#64748b', marginTop: 1, textTransform: 'capitalize' }}>{s.category}</div>
                                             </div>
+                                            <div style={{ fontSize: 10, color: '#94a3b8' }}>{s.reasons?.[0] || ''}</div>
+                                            <div style={{ textAlign: 'center' }}>
+                                                <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 700, color: scoreColor }}>{s.score}</div>
+                                                <div style={{ fontSize: 9, color: '#64748b' }}>score</div>
+                                            </div>
+                                            <div style={{ textAlign: 'center' }}>
+                                                <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 12, color: gapColor }}>
+                                                    {s.gapPercent > 0 ? '+' : ''}{s.gapPercent.toFixed(2)}%
+                                                </div>
+                                                <div style={{ fontSize: 9, color: '#64748b' }}>gap</div>
+                                            </div>
+                                            <div style={{ textAlign: 'center' }}>
+                                                <div style={{ fontSize: 11, fontWeight: 600, color: biasColor }}>{biasLabel}</div>
+                                                <div style={{ fontSize: 9, color: '#64748b' }}>global cue</div>
+                                            </div>
+                                            <div style={{ fontSize: 12, color: '#64748b', textAlign: 'center' }}>{isOpen ? '▲' : '▼'}</div>
                                         </div>
-                                        <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 2 }}>
-                                            {s.category} · {s.sectorBias === 'tailwind' ? '↑ tailwind' : s.sectorBias === 'headwind' ? '↓ headwind' : '→ neutral'}
-                                            {s.gapPercent !== 0 && ` · gap ${s.gapPercent > 0 ? '+' : ''}${s.gapPercent.toFixed(2)}%`}
-                                        </div>
-                                        {s.reasons?.[0] && (
-                                            <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 2, opacity: 0.7 }}>{s.reasons[0]}</div>
+
+                                        {/* Expanded detail panel */}
+                                        {isOpen && (
+                                            <div style={{ padding: '14px 16px 16px', background: '#0f172a', borderTop: '1px solid var(--border)' }}>
+                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                                                    {[
+                                                        { label: 'Score', value: `${s.score} / 100`, color: scoreColor },
+                                                        { label: 'Prev Close', value: s.prevClose ? `₹${s.prevClose.toFixed(2)}` : '—', color: '#f1f5f9' },
+                                                        { label: 'Implied Gap', value: `${s.gapPercent > 0 ? '+' : ''}${s.gapPercent.toFixed(2)}%`, color: gapColor },
+                                                        { label: 'Sector Bias', value: biasLabel, color: biasColor },
+                                                        { label: 'Category', value: s.category, color: '#94a3b8' },
+                                                        { label: 'Volatility', value: s.volatility ? `${(s.volatility * 100).toFixed(1)}%` : '—', color: '#94a3b8' },
+                                                    ].map(item => (
+                                                        <div key={item.label} style={{ background: '#1e293b', borderRadius: 6, padding: '8px 12px' }}>
+                                                            <div style={{ fontSize: 9, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{item.label}</div>
+                                                            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 13, fontWeight: 600, color: item.color }}>{item.value}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+                                                    Why this stock was picked
+                                                </div>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                                    {(s.reasons || []).map((r, ri) => (
+                                                        <div key={ri} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                                                            <span style={{ color: '#6366f1', fontSize: 12, flexShrink: 0, marginTop: 1 }}>›</span>
+                                                            <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>{r}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
