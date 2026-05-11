@@ -135,7 +135,7 @@ export default function PaperTradingPage() {
                 <div className="card" style={{ padding: '14px 18px', borderLeft: '3px solid var(--accent)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
                         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                            <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Today's Bias</div>
+                            <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Today&apos;s Bias</div>
                             <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 13, fontWeight: 700,
                                 color: scan.dayBias.includes('bullish') || scan.dayBias === 'long_heavy' ? 'var(--green)' : scan.dayBias.includes('bearish') || scan.dayBias === 'short_heavy' ? 'var(--red)' : 'var(--amber)' }}>
                                 {scan.dayBias.replace(/_/g, ' ').toUpperCase()}
@@ -164,7 +164,7 @@ export default function PaperTradingPage() {
             <div className="tab-group" style={{ width: 'fit-content' }}>
                 <button className={`tab ${tab === 'today' ? 'active' : ''}`} onClick={() => setTab('today')}>Today</button>
                 <button className={`tab ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}>
-                    Today's 50 {scan ? `(${scan.dayBias.replace(/_/g,' ')})` : ''}
+                    Today&apos;s 50 {scan ? `(${scan.dayBias.replace(/_/g,' ')})` : ''}
                 </button>
                 <button className={`tab ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>History ({history.length} days)</button>
             </div>
