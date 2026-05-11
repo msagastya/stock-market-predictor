@@ -42,6 +42,7 @@ export function formatNumber(value: number): string {
 }
 
 export function formatPercent(value: number, decimals: number = 2): string {
+    if (!Number.isFinite(value)) return '0.00%';
     return `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}%`;
 }
 

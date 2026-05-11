@@ -1,0 +1,81 @@
+name: Paper Trading Engine
+
+on:
+  schedule:
+    # Every 15 min, 9:00 AM to 3:45 PM IST = 3:30 AM to 10:15 AM UTC, Mon-Fri
+    - cron: '15 3 * * 1-5'   # 9:15 AM IST — market open scan
+    - cron: '30 3 * * 1-5'   # 9:30 AM IST — first entry window
+    - cron: '45 3 * * 1-5'   # 9:45 AM IST
+    - cron: '0  4 * * 1-5'   # 10:00 AM IST
+    - cron: '15 4 * * 1-5'   # 10:15 AM IST
+    - cron: '30 4 * * 1-5'   # 10:30 AM IST
+    - cron: '45 4 * * 1-5'   # 10:45 AM IST
+    - cron: '0  5 * * 1-5'   # 11:00 AM IST
+    - cron: '30 5 * * 1-5'   # 11:30 AM IST
+    - cron: '0  6 * * 1-5'   # 12:00 PM IST
+    - cron: '30 6 * * 1-5'   # 12:30 PM IST
+    - cron: '0  7 * * 1-5'   # 1:00 PM IST
+    - cron: '30 7 * * 1-5'   # 1:30 PM IST
+    - cron: '0  8 * * 1-5'   # 2:00 PM IST
+    - cron: '30 8 * * 1-5'   # 2:30 PM IST
+    - cron: '45 8 * * 1-5'   # 2:45 PM IST — pre-exit warning
+    - cron: '0  9 * * 1-5'   # 3:00 PM IST
+    - cron: '15 9 * * 1-5'   # 3:15 PM IST — exit window
+    - cron: '30 9 * * 1-5'   # 3:30 PM IST — market close + EOD summary
+
+  workflow_dispatch:
+    inputs:
+      force_eod:
+        description: 'Force EOD summary generation'
+        required: false
+        default: 'false'
+
+jobs:
+  paper-trade-tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Run paper trading tick
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.VERCEL_APP_URL }}/api/trading/paper" \
+            -H "x-trading-secret: ${{ secrets.TRADING_SECRET }}" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          # Extract key info
+          PHASE=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('phase','unknown'))" 2>/dev/null || echo "unknown")
+          OPEN=$(echo "$BODY"  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('openTrades',0))" 2>/dev/null || echo "0")
+          TOTAL=$(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('totalTodayTrades',0))" 2>/dev/null || echo "0")
+
+          echo "Phase: $PHASE | Open positions: $OPEN | Total today: $TOTAL"
+
+          # Print log lines
+          echo "$BODY" | python3 -c "
+          import sys, json
+          try:
+              d = json.load(sys.stdin)
+              for line in d.get('log', []):
+                  print(' >', line)
+              summary = d.get('summary')
+              if summary:
+                  print('=== EOD SUMMARY ===')
+                  print(f'Trades: {summary.get(\"totalTrades\",0)} | Winners: {summary.get(\"winners\",0)} | Losers: {summary.get(\"losers\",0)}')
+                  print(f'Gross PnL: {summary.get(\"grossPnL\",0)} | Charges: {summary.get(\"totalCharges\",0)} | Net: {summary.get(\"netPnL\",0)}')
+                  print(f'Win Rate: {summary.get(\"winRate\",0)}%')
+                  for rec in summary.get('recommendations', []):
+                      print(f'  Rec: {rec}')
+          except Exception as e:
+              print(f'Parse error: {e}')
+          " 2>/dev/null || true
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "ERROR: Non-200 response"
+            exit 1
+          fi

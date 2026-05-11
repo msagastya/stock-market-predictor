@@ -240,15 +240,15 @@ export async function createSingleGTT(params: {
     const tradingsymbol = symbol.replace(/\.(NS|BO)$/, '');
     const product = params.product || 'CNC';
 
-    const body = JSON.stringify({
+    const body = new URLSearchParams({
         type: 'single',
-        condition: { exchange, tradingsymbol, trigger_values: [triggerPrice], last_price: lastPrice },
-        orders: [{ exchange, tradingsymbol, transaction_type: transactionType, quantity, order_type: 'LIMIT', product, price: orderPrice }],
+        condition: JSON.stringify({ exchange, tradingsymbol, trigger_values: [triggerPrice], last_price: lastPrice }),
+        orders: JSON.stringify([{ exchange, tradingsymbol, transaction_type: transactionType, quantity, order_type: 'LIMIT', product, price: orderPrice }]),
     });
 
     const res = await fetch(`${KITE_BASE}/gtt/triggers`, {
         method: 'POST',
-        headers: kiteHeaders('application/json'),
+        headers: kiteHeaders(),
         body,
     });
     const data = await res.json();
@@ -275,22 +275,18 @@ export async function createOCOGTT(params: {
     const tradingsymbol = symbol.replace(/\.(NS|BO)$/, '');
     const product = params.product || 'CNC';
 
-    const body = JSON.stringify({
+    const body = new URLSearchParams({
         type: 'two-leg',
-        condition: {
-            exchange, tradingsymbol,
-            trigger_values: [stopLossPrice, targetPrice],
-            last_price: lastPrice,
-        },
-        orders: [
+        condition: JSON.stringify({ exchange, tradingsymbol, trigger_values: [stopLossPrice, targetPrice], last_price: lastPrice }),
+        orders: JSON.stringify([
             { exchange, tradingsymbol, transaction_type: 'SELL', quantity, order_type: 'LIMIT', product, price: stopLossPrice },
             { exchange, tradingsymbol, transaction_type: 'SELL', quantity, order_type: 'LIMIT', product, price: targetPrice },
-        ],
+        ]),
     });
 
     const res = await fetch(`${KITE_BASE}/gtt/triggers`, {
         method: 'POST',
-        headers: kiteHeaders('application/json'),
+        headers: kiteHeaders(),
         body,
     });
     const data = await res.json();

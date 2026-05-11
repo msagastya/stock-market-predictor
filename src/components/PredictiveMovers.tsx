@@ -23,77 +23,127 @@ interface PredictiveData {
     meta: { universe: number; timestamp: string };
 }
 
-const CONFIDENCE_BADGE: Record<string, string> = {
-    high: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-    medium: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',
-    low: 'bg-slate-500/20 text-slate-400 border border-slate-500/30',
+const CONF_STYLE: Record<string, { bg: string; color: string; border: string }> = {
+    high:   { bg: 'var(--green-dim)',  color: 'var(--green)',  border: 'rgba(52,211,153,0.2)' },
+    medium: { bg: 'var(--amber-dim)',  color: 'var(--amber)',  border: 'rgba(251,191,36,0.2)' },
+    low:    { bg: 'var(--surface2)',   color: 'var(--text2)',  border: 'var(--border2)' },
 };
 
-function ScoreBar({ score, max = 120 }: { score: number; max?: number }) {
+function ScoreBar({ score, max = 120, up }: { score: number; max?: number; up: boolean }) {
     const pct = Math.min((score / max) * 100, 100);
     return (
-        <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-current rounded-full transition-all" style={{ width: `${pct}%` }} />
+        <div style={{ width: '100%', height: 2, background: 'var(--surface3)', borderRadius: 2, overflow: 'hidden' }}>
+            <div
+                style={{
+                    height: '100%',
+                    width: `${pct}%`,
+                    background: up ? 'var(--green)' : 'var(--red)',
+                    borderRadius: 2,
+                    transition: 'width 0.4s ease',
+                }}
+            />
         </div>
     );
 }
 
 function StockCard({ stock, side }: { stock: ScoredStock; side: 'bull' | 'bear' }) {
     const isBull = side === 'bull';
-    const accent = isBull ? 'text-emerald-400' : 'text-rose-400';
-    const barColor = isBull ? 'text-emerald-400' : 'text-rose-400';
+    const conf = CONF_STYLE[stock.confidence] || CONF_STYLE.low;
+    const chg = stock.changePercent ?? 0;
 
     return (
-        <div className={`rounded-xl p-4 border transition-all hover:scale-[1.01] ${isBull ? 'bg-emerald-950/30 border-emerald-800/30 hover:border-emerald-600/40' : 'bg-rose-950/30 border-rose-800/30 hover:border-rose-600/40'}`}>
-            <div className="flex items-start justify-between mb-2">
+        <div
+            style={{
+                background: 'var(--surface)',
+                border: `1px solid var(--border)`,
+                borderRadius: 10,
+                padding: '14px 16px',
+                transition: 'border-color 0.2s, box-shadow 0.2s',
+                cursor: 'default',
+            }}
+            onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.borderColor = isBull ? 'rgba(52,211,153,0.2)' : 'rgba(251,113,133,0.2)';
+                (e.currentTarget as HTMLElement).style.boxShadow = isBull ? '0 4px 16px rgba(0,0,0,0.3)' : '0 4px 16px rgba(0,0,0,0.3)';
+            }}
+            onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+                (e.currentTarget as HTMLElement).style.boxShadow = 'none';
+            }}
+        >
+            {/* Header row */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
                 <div>
-                    <div className="flex items-center gap-2">
-                        <span className="font-bold text-white text-sm">{stock.symbol.replace('.NS', '')}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${CONFIDENCE_BADGE[stock.confidence]}`}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+                        <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 500, color: 'var(--text)', fontSize: 13 }}>
+                            {stock.symbol.replace('.NS', '')}
+                        </span>
+                        <span
+                            style={{
+                                fontSize: 10,
+                                padding: '1px 6px',
+                                borderRadius: 4,
+                                fontWeight: 500,
+                                background: conf.bg,
+                                color: conf.color,
+                                border: `1px solid ${conf.border}`,
+                                letterSpacing: '0.04em',
+                            }}
+                        >
                             {stock.confidence}
                         </span>
                     </div>
-                    <div className="text-xs text-slate-400 truncate max-w-[160px]">{stock.name}</div>
-                    {stock.sector && <div className="text-xs text-slate-500 mt-0.5">{stock.sector}</div>}
+                    <div style={{ fontSize: 11, color: 'var(--text2)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {stock.name}
+                    </div>
+                    {stock.sector && (
+                        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{stock.sector}</div>
+                    )}
                 </div>
-                <div className="text-right">
-                    <div className="text-white font-semibold text-sm">₹{stock.price.toLocaleString('en-IN')}</div>
-                    <div className={`text-xs font-medium ${stock.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {stock.changePercent >= 0 ? '▲' : '▼'}{Math.abs(stock.changePercent).toFixed(2)}% today
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 13, fontWeight: 500, color: 'var(--text)', marginBottom: 3 }}>
+                        ₹{stock.price.toLocaleString('en-IN')}
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 500, color: chg >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'DM Mono, monospace' }}>
+                        {chg >= 0 ? '▲' : '▼'} {Math.abs(chg).toFixed(2)}%
                     </div>
                 </div>
             </div>
 
-            <div className={`${barColor} mb-2`}>
-                <ScoreBar score={stock.score} />
+            {/* Score bar */}
+            <div style={{ marginBottom: 10 }}>
+                <ScoreBar score={stock.score} up={isBull} />
             </div>
 
-            <div className="grid grid-cols-3 gap-1 mb-2 text-center">
-                <div className="bg-white/5 rounded p-1">
-                    <div className="text-xs text-slate-400">30d</div>
-                    <div className={`text-xs font-bold ${stock.perChange30d >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {stock.perChange30d >= 0 ? '+' : ''}{stock.perChange30d.toFixed(1)}%
+            {/* Stats row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 10 }}>
+                {[
+                    { label: '30d', value: `${(stock.perChange30d ?? 0) >= 0 ? '+' : ''}${(stock.perChange30d ?? 0).toFixed(1)}%`, pos: (stock.perChange30d ?? 0) >= 0 },
+                    { label: '1Y',  value: `${(stock.perChange365d ?? 0) >= 0 ? '+' : ''}${(stock.perChange365d ?? 0).toFixed(0)}%`, pos: (stock.perChange365d ?? 0) >= 0 },
+                    { label: 'vs 52wH', value: `−${(stock.belowYearHigh ?? 0).toFixed(1)}%`, pos: false },
+                ].map(({ label, value, pos }) => (
+                    <div
+                        key={label}
+                        style={{
+                            background: 'var(--surface2)',
+                            borderRadius: 6,
+                            padding: '5px 8px',
+                            textAlign: 'center',
+                        }}
+                    >
+                        <div style={{ fontSize: 9, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>{label}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: pos ? 'var(--green)' : 'var(--red)', fontFamily: 'DM Mono, monospace' }}>
+                            {value}
+                        </div>
                     </div>
-                </div>
-                <div className="bg-white/5 rounded p-1">
-                    <div className="text-xs text-slate-400">1Y</div>
-                    <div className={`text-xs font-bold ${stock.perChange365d >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {stock.perChange365d >= 0 ? '+' : ''}{stock.perChange365d.toFixed(0)}%
-                    </div>
-                </div>
-                <div className="bg-white/5 rounded p-1">
-                    <div className="text-xs text-slate-400">52wH dist</div>
-                    <div className="text-xs font-bold text-slate-300">
-                        -{stock.belowYearHigh.toFixed(1)}%
-                    </div>
-                </div>
+                ))}
             </div>
 
-            <div className="space-y-1">
+            {/* Signals */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {stock.signals.slice(0, 3).map((sig, i) => (
-                    <div key={i} className="flex items-start gap-1.5">
-                        <span className={`text-xs mt-0.5 ${accent}`}>›</span>
-                        <span className="text-xs text-slate-300">{sig}</span>
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                        <span style={{ color: isBull ? 'var(--green)' : 'var(--red)', fontSize: 10, marginTop: 1, flexShrink: 0 }}>›</span>
+                        <span style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.4 }}>{sig}</span>
                     </div>
                 ))}
             </div>
@@ -116,7 +166,7 @@ export default function PredictiveMovers() {
             setData(d);
             setLastUpdate(new Date().toLocaleTimeString('en-IN'));
             setError(null);
-        } catch (e) {
+        } catch {
             setError('Failed to load predictive movers');
         } finally {
             setLoading(false);
@@ -125,22 +175,23 @@ export default function PredictiveMovers() {
 
     useEffect(() => {
         load();
-        const id = setInterval(load, 5 * 60 * 1000); // refresh every 5 min
+        const id = setInterval(load, 5 * 60 * 1000);
         return () => clearInterval(id);
     }, []);
 
     if (loading && !data) {
         return (
-            <div className="rounded-2xl bg-slate-900/50 border border-white/10 p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                        <span className="text-violet-400 text-sm">⚡</span>
+            <div className="card" style={{ padding: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--accent-dim)', border: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--accent)' }}>⚡</div>
+                    <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', fontFamily: 'Bricolage Grotesque, DM Sans, sans-serif' }}>Predictive Movers</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>Analysing momentum signals…</div>
                     </div>
-                    <h2 className="text-white font-semibold text-lg">Predictive Movers</h2>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     {[...Array(4)].map((_, i) => (
-                        <div key={i} className="h-40 rounded-xl bg-white/5 animate-pulse" />
+                        <div key={i} className="skeleton" style={{ height: 160, borderRadius: 10 }} />
                     ))}
                 </div>
             </div>
@@ -149,9 +200,9 @@ export default function PredictiveMovers() {
 
     if (error) {
         return (
-            <div className="rounded-2xl bg-slate-900/50 border border-white/10 p-6">
-                <p className="text-rose-400 text-sm">{error}</p>
-                <button onClick={load} className="mt-2 text-xs text-slate-400 underline">Retry</button>
+            <div className="card" style={{ padding: 20 }}>
+                <p style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{error}</p>
+                <button onClick={load} className="btn btn-secondary btn-sm">Retry</button>
             </div>
         );
     }
@@ -159,52 +210,59 @@ export default function PredictiveMovers() {
     if (!data) return null;
 
     return (
-        <div className="rounded-2xl bg-slate-900/50 border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                        <span className="text-violet-400 text-sm">⚡</span>
-                    </div>
+        <div className="card" style={{ padding: 20 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--accent-dim)', border: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--accent)', flexShrink: 0 }}>⚡</div>
                     <div>
-                        <h2 className="text-white font-semibold text-lg">Predictive Movers</h2>
-                        <p className="text-xs text-slate-400">
-                            Scored across {data.meta.universe} NSE stocks · Updated {lastUpdate}
-                        </p>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', fontFamily: 'Bricolage Grotesque, DM Sans, sans-serif', letterSpacing: '-0.02em' }}>
+                            Predictive Movers
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                            {data.meta.universe} NSE stocks scored · {lastUpdate}
+                        </div>
                     </div>
                 </div>
-                <button onClick={load} className="text-xs text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10">
-                    {loading ? 'Refreshing…' : 'Refresh'}
+                <button
+                    onClick={load}
+                    className="btn btn-ghost btn-sm"
+                    style={{ flexShrink: 0 }}
+                    disabled={loading}
+                >
+                    {loading ? '…' : '↻ Refresh'}
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                 {/* Bullish */}
                 <div>
-                    <div className="flex items-center gap-2 mb-3">
-                        <span className="text-emerald-400 font-semibold text-sm">▲ Top 5 Bullish</span>
-                        <span className="text-xs text-slate-500">— predicted upside</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--green)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>▲ Bullish</span>
+                        <span style={{ fontSize: 10, color: 'var(--text3)' }}>predicted upside</span>
                     </div>
-                    <div className="space-y-3">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {data.bullish.map(s => <StockCard key={s.symbol} stock={s} side="bull" />)}
-                        {data.bullish.length === 0 && <p className="text-slate-500 text-sm">No strong bullish setups found</p>}
+                        {data.bullish.length === 0 && <p style={{ fontSize: 12, color: 'var(--text3)' }}>No strong bullish setups found</p>}
                     </div>
                 </div>
 
                 {/* Bearish */}
                 <div>
-                    <div className="flex items-center gap-2 mb-3">
-                        <span className="text-rose-400 font-semibold text-sm">▼ Top 5 Bearish</span>
-                        <span className="text-xs text-slate-500">— predicted downside</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--red)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>▼ Bearish</span>
+                        <span style={{ fontSize: 10, color: 'var(--text3)' }}>predicted downside</span>
                     </div>
-                    <div className="space-y-3">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {data.bearish.map(s => <StockCard key={s.symbol} stock={s} side="bear" />)}
-                        {data.bearish.length === 0 && <p className="text-slate-500 text-sm">No strong bearish setups found</p>}
+                        {data.bearish.length === 0 && <p style={{ fontSize: 12, color: 'var(--text3)' }}>No strong bearish setups found</p>}
                     </div>
                 </div>
             </div>
 
-            <p className="text-xs text-slate-600 mt-4 text-center">
-                Scoring based on 30d/1Y momentum, 52w range proximity, volume, and session pattern · Not financial advice
+            <p style={{ fontSize: 10, color: 'var(--text4)', marginTop: 14, textAlign: 'center', letterSpacing: '0.02em' }}>
+                Scoring: 30d/1Y momentum · 52w range proximity · volume · session pattern · Not financial advice
             </p>
         </div>
     );

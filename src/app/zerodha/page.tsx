@@ -455,9 +455,13 @@ function ZerodhaPageInner() {
                                         <span className="text-white ml-2">{o.tradingsymbol}</span>
                                         <span className="text-xs text-slate-400 ml-2">{o.quantity} @ ₹{o.price || o.average_price} · {o.order_type} · {o.product}</span>
                                     </div>
-                                    <div className="text-right">
+                                    <div className="text-right" style={{ minWidth: 120 }}>
                                         <StatusBadge status={o.status} />
-                                        <div className="text-xs text-slate-500 mt-1">{o.order_timestamp?.split(' ')[1] || ''}</div>
+                                        <div className="text-xs text-slate-500 mt-1" style={{ whiteSpace: 'nowrap' }}>
+                                            {o.order_timestamp
+                                                ? new Date(o.order_timestamp).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
+                                                : ''}
+                                        </div>
                                     </div>
                                 </div>
                             ))}
