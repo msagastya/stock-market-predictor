@@ -9,8 +9,10 @@
 import { WATCHLIST, WatchStock, Sector } from './watchlist';
 export { WATCHLIST } from './watchlist';
 export type { WatchStock, Sector } from './watchlist';
-import { detectHunt, findSwingLevels, calculateATR, getMarketPhase, Candle } from './hunt-detector';
-import { calculateCharges, isTradeWorthTaking } from './charge-calculator';
+import { getMarketPhase, Candle } from './hunt-detector';
+import { calculateCharges } from './charge-calculator';
+import { fetchCandles as fetchKiteCandles, applySlippage } from './kite-candles';
+import { analyzeSignal } from './signal-engine';
 
 // ── Risk profiles ──────────────────────────────────────────────────────────────
 
@@ -102,104 +104,48 @@ export interface DailySummary {
     recommendations: string[]; // what to do tomorrow
 }
 
-// ── Candle fetcher (Yahoo Finance) ────────────────────────────────────────────
-
+// ── Candle fetcher — Kite first, Yahoo fallback ───────────────────────────────
 export async function fetchCandles(symbol: string, interval: '5m' | '15m' | '1d' = '15m', days = 5): Promise<Candle[]> {
-    try {
-        const range = interval === '1d' ? '60d' : `${days}d`;
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=false`;
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-        const json = await res.json();
-        const result = json?.chart?.result?.[0];
-        if (!result) return [];
-
-        const timestamps = result.timestamp || [];
-        const q = result.indicators?.quote?.[0] || {};
-        const candles: Candle[] = [];
-
-        for (let i = 0; i < timestamps.length; i++) {
-            if (!q.open?.[i] || !q.close?.[i]) continue;
-            candles.push({
-                time:   timestamps[i] * 1000,
-                open:   q.open[i],
-                high:   q.high[i],
-                low:    q.low[i],
-                close:  q.close[i],
-                volume: q.volume?.[i] || 0,
-            });
-        }
-        return candles;
-    } catch {
-        return [];
-    }
+    // Derive NSE symbol from Yahoo symbol for Kite lookup
+    const nseSymbol = symbol.replace(/\.(NS|BO)$/, '').replace('^', '');
+    return fetchKiteCandles(symbol, nseSymbol, interval, days);
 }
 
-// ── Position sizing ────────────────────────────────────────────────────────────
-
-function calcQuantity(capital: number, price: number, stopPercent: number): number {
-    // Risk amount = capital × stopPercent%
-    // Quantity = riskAmount / (price × stopPercent%)
-    const riskAmount = capital * (stopPercent / 100);
-    const riskPerShare = price * (stopPercent / 100);
-    return Math.max(1, Math.floor(riskAmount / riskPerShare));
-}
-
-// ── Core analysis for one stock ────────────────────────────────────────────────
-
+// ── Core analysis — delegates to unified signal engine ────────────────────────
 export async function analyzeStock(stock: WatchStock, profile: RiskProfile, now: Date): Promise<PaperTrade | null> {
-    const candles = await fetchCandles(stock.symbol, '15m', 5);
-    if (candles.length < 10) return null;
+    const signal = await analyzeSignal(stock, profile, now);
+    if (!signal) return null;
 
-    const levels  = findSwingLevels(candles, 3);
-    const atr     = calculateATR(candles);
-    const hunt    = detectHunt(candles, levels);
-    const last    = candles[candles.length - 1];
-    const phase   = getMarketPhase(now);
+    const hunt = { reason: signal.signalDetail, confidence: signal.confidence };
 
-    // Only enter during entry or trend window
-    if (phase.phase !== 'entry_window' && phase.phase !== 'trend_window') return null;
-
-    // Only enter on high/medium confidence signals
-    if (!hunt.detected || hunt.confidence === 'low') return null;
-    if (hunt.recommendation === 'wait' || hunt.recommendation === 'avoid') return null;
-
-    const direction: TradeDirection = hunt.type === 'long_hunt' ? 'long' : 'short';
-    const entryPrice = last.close;
-    const stopPrice  = hunt.structuralStop || (direction === 'long'
-        ? entryPrice * (1 - profile.stopPercent / 100)
-        : entryPrice * (1 + profile.stopPercent / 100));
-
-    const actualStopPercent = Math.abs(entryPrice - stopPrice) / entryPrice * 100;
-    const targetPercent     = actualStopPercent * profile.targetMultiple;
-    const targetPrice       = direction === 'long'
-        ? entryPrice * (1 + targetPercent / 100)
-        : entryPrice * (1 - targetPercent / 100);
-
-    const quantity = calcQuantity(profile.capital, entryPrice, actualStopPercent);
-
-    // Check if trade is worth taking after charges
-    const worthCheck = isTradeWorthTaking({
-        entryPrice,
-        targetPercent,
-        quantity,
-        type: 'intraday',
-    });
-
-    if (!worthCheck.worth) {
-        // Log as avoided — this is data too
+    if (!signal.worthTaking) {
         return buildTrade({
-            stock, profile, direction, entryPrice, stopPrice, targetPrice,
-            quantity, now, hunt, exitReason: 'avoided_charges',
-            patternObservation: `Skipped: ${worthCheck.reason}`,
+            stock, profile,
+            direction: signal.direction,
+            entryPrice: signal.entryPrice,
+            stopPrice: signal.stopPrice,
+            targetPrice: signal.targetPrice,
+            quantity: signal.quantity,
+            now, hunt,
+            exitReason: 'avoided_charges',
+            patternObservation: `Skipped: ${signal.skipReason}`,
             holdType: 'intraday',
+            signalType: signal.signalType,
         });
     }
 
     return buildTrade({
-        stock, profile, direction, entryPrice, stopPrice, targetPrice,
-        quantity, now, hunt, exitReason: 'open',
+        stock, profile,
+        direction: signal.direction,
+        entryPrice: signal.entryPrice,
+        stopPrice: signal.stopPrice,
+        targetPrice: signal.targetPrice,
+        quantity: signal.quantity,
+        now, hunt,
+        exitReason: 'open',
         patternObservation: '',
         holdType: 'intraday',
+        signalType: signal.signalType,
     });
 }
 
@@ -208,6 +154,7 @@ function buildTrade(p: {
     entryPrice: number; stopPrice: number; targetPrice: number;
     quantity: number; now: Date; hunt: any; exitReason: TradeStatus;
     patternObservation: string; holdType: 'intraday' | 'delivery';
+    signalType?: string;
 }): PaperTrade {
     const ist = new Date(p.now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     const timeStr = `${String(ist.getHours()).padStart(2,'0')}:${String(ist.getMinutes()).padStart(2,'0')}`;
@@ -273,6 +220,9 @@ export function simulateExit(trade: PaperTrade, currentCandles: Candle[], now: D
     }
 
     if (!exitPrice) return trade; // still open
+
+    // Apply slippage to exit fill
+    exitPrice = applySlippage(exitPrice, trade.direction === 'long' ? 'sell' : 'buy');
 
     const buyP  = trade.direction === 'long' ? trade.entryPrice : exitPrice;
     const sellP = trade.direction === 'long' ? exitPrice : trade.entryPrice;
