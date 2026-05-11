@@ -217,7 +217,7 @@ function buildTrade(p: {
         id: `${p.stock.nseSymbol}-${p.profile.id}-${Date.now()}`,
         date: dateStr,
         symbol: p.stock.nseSymbol,
-        sector: p.stock.sector,
+        sector: p.stock.category,
         riskProfile: p.profile.id,
         direction: p.direction,
         entryPrice: p.entryPrice,
