@@ -8,19 +8,19 @@ on:
     - cron: '40 3 * * 1-5'
     # Session 2: 11:15–13:15 IST = 5:45 UTC
     - cron: '45 5 * * 1-5'
-    # Session 3: 13:15–15:35 IST = 7:45 UTC
+    # Session 3: 13:15–15:35 IST = 7:45 UTC (includes EOD + AI report)
     - cron: '45 7 * * 1-5'
 
   workflow_dispatch:
     inputs:
       job:
-        description: 'morning_scan or tick'
+        description: 'morning_scan, tick, or eod'
         required: false
         default: 'tick'
 
 jobs:
   morning_scan:
-    name: Morning Scan (7 AM IST)
+    name: Morning Scan + AI Briefing (7 AM IST)
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'morning_scan') ||
@@ -31,8 +31,8 @@ jobs:
           APP_URL: ${{ secrets.VERCEL_APP_URL }}
           SECRET: ${{ secrets.TRADING_SECRET }}
         run: |
-          echo "Running morning scan at $(date -u)"
-          RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/morning-scan" \
+          echo "Running morning scan + AI briefing at $(date -u)"
+          RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=morning_scan" \
             -H "x-trading-secret: ${SECRET}" \
             -H "Content-Type: application/json" --max-time 58)
           CODE=$(echo "$RESP" | tail -1)
@@ -53,7 +53,7 @@ jobs:
           END_UTC=$(date -u -d '+2 hours 5 minutes' +%s)
           echo "Session 1 started, running until $(date -u -d @$END_UTC)"
           while [ "$(date +%s)" -lt "$END_UTC" ]; do
-            RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/paper" \
+            RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=tick" \
               -H "x-trading-secret: ${SECRET}" \
               -H "Content-Type: application/json" --max-time 55)
             CODE=$(echo "$RESP" | tail -1)
@@ -75,7 +75,7 @@ jobs:
           END_UTC=$(date -u -d '+2 hours' +%s)
           echo "Session 2 started, running until $(date -u -d @$END_UTC)"
           while [ "$(date +%s)" -lt "$END_UTC" ]; do
-            RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/paper" \
+            RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=tick" \
               -H "x-trading-secret: ${SECRET}" \
               -H "Content-Type: application/json" --max-time 55)
             CODE=$(echo "$RESP" | tail -1)
@@ -85,7 +85,7 @@ jobs:
           done
 
   session_3:
-    name: Market Session 3 (13:15-15:35 IST)
+    name: Market Session 3 + EOD Report (13:15-15:35 IST)
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' && github.event.schedule == '45 7 * * 1-5'
     steps:
@@ -97,7 +97,7 @@ jobs:
           END_UTC=$(date -u -d '+2 hours 20 minutes' +%s)
           echo "Session 3 started, running until $(date -u -d @$END_UTC)"
           while [ "$(date +%s)" -lt "$END_UTC" ]; do
-            RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/paper" \
+            RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=tick" \
               -H "x-trading-secret: ${SECRET}" \
               -H "Content-Type: application/json" --max-time 55)
             CODE=$(echo "$RESP" | tail -1)
@@ -105,17 +105,30 @@ jobs:
             echo "$(date -u +%H:%M:%S) HTTP $CODE | $BODY"
             sleep 55
           done
-
-  manual_tick:
-    name: Manual Tick
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'tick'
-    steps:
-      - name: Single tick
+      - name: Generate AI daily report
         env:
           APP_URL: ${{ secrets.VERCEL_APP_URL }}
           SECRET: ${{ secrets.TRADING_SECRET }}
         run: |
-          curl -s -X POST "${APP_URL}/api/trading/paper" \
+          echo "Generating EOD AI report..."
+          RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=eod" \
+            -H "x-trading-secret: ${SECRET}" \
+            -H "Content-Type: application/json" --max-time 58)
+          CODE=$(echo "$RESP" | tail -1)
+          BODY=$(echo "$RESP" | head -n -1)
+          echo "HTTP $CODE: $BODY"
+
+  manual_tick:
+    name: Manual Tick / EOD
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.job == 'tick' || github.event.inputs.job == 'eod')
+    steps:
+      - name: Single tick or EOD
+        env:
+          APP_URL: ${{ secrets.VERCEL_APP_URL }}
+          SECRET: ${{ secrets.TRADING_SECRET }}
+          JOB: ${{ github.event.inputs.job }}
+        run: |
+          curl -s -X POST "${APP_URL}/api/trading/run?mode=${JOB}" \
             -H "x-trading-secret: ${SECRET}" \
             -H "Content-Type: application/json" | python3 -m json.tool
