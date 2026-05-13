@@ -19,7 +19,6 @@ jobs:
     steps:
       - name: Run backtest
         run: |
-          set -e
           if [ "$PERIOD" = "6m" ]; then
             CHUNKS=1
           elif [ "$PERIOD" = "1y" ]; then
@@ -29,17 +28,33 @@ jobs:
           fi
 
           if [ "$CHUNKS" = "1" ]; then
-            echo "Running 6m single-shot..."
-            curl -sf -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}" \
+            echo "Running ${PERIOD} single-shot..."
+            curl -s -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}" \
               -H "x-trading-secret: ${TRADING_SECRET}" | python3 -m json.tool
           else
             for i in $(seq 1 $CHUNKS); do
               echo "=== Chunk $i / $CHUNKS ==="
-              curl -sf -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=${i}" \
-                -H "x-trading-secret: ${TRADING_SECRET}" | python3 -m json.tool || echo "chunk $i failed"
-              sleep 30
+              curl -s -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=${i}" \
+                -H "x-trading-secret: ${TRADING_SECRET}" | python3 -c "
+import sys,json
+try:
+  d=json.load(sys.stdin)
+  print(f'  days={d.get(\"tradingDays\")} trades={d.get(\"totalTrades\")} pnl={d.get(\"totalPnL\")} msg={d.get(\"message\",\"\")[:60]}')
+except: print('  parse error')
+"
+              sleep 35
             done
-            echo "=== Merging ==="
-            curl -sf -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=merge" \
-              -H "x-trading-secret: ${TRADING_SECRET}" | python3 -m json.tool
+            echo "=== Merging all ${CHUNKS} chunks ==="
+            curl -s -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=merge" \
+              -H "x-trading-secret: ${TRADING_SECRET}" | python3 -c "
+import sys,json
+try:
+  d=json.load(sys.stdin)
+  print('FINAL RESULT:')
+  print(f'  Period={d.get(\"period\")} Days={d.get(\"tradingDays\")} Trades={d.get(\"totalTrades\")} WinRate={d.get(\"winRate\")}% PnL={d.get(\"totalPnL\")}')
+  print('Top conditions (best win rates):')
+  for c in (d.get('topStocks') or [])[:5]:
+    print(f'  {c}')
+except Exception as e: print(f'  merge parse error: {e}')
+"
           fi

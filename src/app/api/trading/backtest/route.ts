@@ -293,15 +293,40 @@ export async function POST(req: NextRequest) {
     // ── Step 3: Simulate all trades in memory ─────────────────────────────────
 
     // Aggregation buckets
-    const stockStats:  Record<string, { trades: number; wins: number; losses: number; pnl: number; signals: Record<string, number> }> = {};
-    const signalStats: Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
-    const monthStats:  Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
-    const dayStats:    Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
+    const stockStats:     Record<string, { trades: number; wins: number; losses: number; pnl: number; signals: Record<string, number> }> = {};
+    const signalStats:    Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
+    const monthStats:     Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
+    const dayStats:       Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
+    // Condition patterns — the key insight: WHAT CONDITIONS produce wins
+    const conditionStats: Record<string, { trades: number; wins: number; losses: number; pnl: number; label: string }> = {};
+
+    function trackCondition(key: string, label: string, isWin: boolean, pnl: number) {
+        if (!conditionStats[key]) conditionStats[key] = { trades: 0, wins: 0, losses: 0, pnl: 0, label };
+        conditionStats[key].trades++;
+        conditionStats[key].pnl += pnl;
+        if (isWin) conditionStats[key].wins++; else conditionStats[key].losses++;
+    }
 
     let totalTrades = 0, totalWins = 0, totalLosses = 0, totalPnL = 0;
 
     for (const date of tradingDays) {
         const dayProfileCounts: Record<string, number> = {};
+
+        // Market-wide context for this day (use first available stock as proxy)
+        const anyCandles = Object.values(allCandles)[0] || [];
+        const mktIdx = anyCandles.findIndex(c => dateStr(c.time) === date);
+        const mktDay = mktIdx >= 1 ? anyCandles[mktIdx] : null;
+        const mktPrev = mktIdx >= 1 ? anyCandles[mktIdx - 1] : null;
+        const mktGapPct = mktDay && mktPrev ? (mktDay.open - mktPrev.close) / mktPrev.close * 100 : 0;
+        const mktDayMove = mktDay ? (mktDay.close - mktDay.open) / mktDay.open * 100 : 0;
+        // Market regime: strong_up, strong_down, choppy, trending_up, trending_down
+        const mktRegime = Math.abs(mktGapPct) >= 1.5
+            ? (mktGapPct > 0 ? 'gap_up_day' : 'gap_down_day')
+            : Math.abs(mktDayMove) >= 1.0
+            ? (mktDayMove > 0 ? 'trending_up' : 'trending_down')
+            : 'choppy';
+        // Day of week
+        const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(date).getDay()];
 
         for (const stock of stocks) {
             const candles = allCandles[stock.nseSymbol];
@@ -331,6 +356,15 @@ export async function POST(req: NextRequest) {
                 // Aggregate
                 const month = date.slice(0, 7);
                 const isWin = exit.netPnL > 0;
+
+                // Track condition patterns
+                trackCondition(`regime_${mktRegime}`, `Market regime: ${mktRegime}`, isWin, exit.netPnL);
+                trackCondition(`signal_${signal.type}_${mktRegime}`, `${signal.type} signal on ${mktRegime} day`, isWin, exit.netPnL);
+                trackCondition(`direction_${signal.direction}_${mktRegime}`, `${signal.direction} trade on ${mktRegime}`, isWin, exit.netPnL);
+                trackCondition(`dow_${dow}`, `Day of week: ${dow}`, isWin, exit.netPnL);
+                trackCondition(`signal_${signal.type}`, `Signal type: ${signal.type}`, isWin, exit.netPnL);
+                trackCondition(`direction_${signal.direction}`, `Direction: ${signal.direction}`, isWin, exit.netPnL);
+                trackCondition(`conf_${signal.confidence}`, `Confidence: ${signal.confidence}`, isWin, exit.netPnL);
 
                 if (!stockStats[stock.nseSymbol]) stockStats[stock.nseSymbol] = { trades: 0, wins: 0, losses: 0, pnl: 0, signals: {} };
                 if (!signalStats[signal.type])    signalStats[signal.type]    = { trades: 0, wins: 0, losses: 0, pnl: 0 };
@@ -394,23 +428,39 @@ export async function POST(req: NextRequest) {
 
     const docId = chunk ? `chunk_${period}_${chunk}` : `summary_${period}`;
 
+    // Condition patterns ranked by win rate (min 10 trades)
+    const conditionList = Object.entries(conditionStats)
+        .filter(([, s]) => s.trades >= 10)
+        .map(([key, s]) => ({
+            key,
+            label:   s.label,
+            trades:  s.trades,
+            wins:    s.wins,
+            losses:  s.losses,
+            winRate: Math.round(s.wins / s.trades * 100),
+            pnl:     Math.round(s.pnl),
+            avgPnl:  Math.round(s.pnl / s.trades),
+        }))
+        .sort((a, b) => b.winRate - a.winRate);
+
     const summary = {
         period,
-        chunk:        chunk || 'full',
-        runAt:        new Date().toISOString(),
-        tradingDays:  tradingDays.length,
-        stocksUsed:   Object.keys(allCandles).length,
+        chunk:          chunk || 'full',
+        runAt:          new Date().toISOString(),
+        tradingDays:    tradingDays.length,
+        stocksUsed:     Object.keys(allCandles).length,
         totalTrades,
         totalWins,
         totalLosses,
-        winRate:      totalTrades > 0 ? Math.round(totalWins / totalTrades * 100) : 0,
-        totalPnL:     Math.round(totalPnL),
-        avgDailyPnL:  tradingDays.length > 0 ? Math.round(totalPnL / tradingDays.length) : 0,
-        stockStats:   JSON.stringify(stockList),
-        signalStats:  JSON.stringify(signalList),
-        monthStats:   JSON.stringify(monthList),
-        bestDays:     JSON.stringify(bestDays),
-        worstDays:    JSON.stringify(worstDays),
+        winRate:        totalTrades > 0 ? Math.round(totalWins / totalTrades * 100) : 0,
+        totalPnL:       Math.round(totalPnL),
+        avgDailyPnL:    tradingDays.length > 0 ? Math.round(totalPnL / tradingDays.length) : 0,
+        stockStats:     JSON.stringify(stockList),
+        signalStats:    JSON.stringify(signalList),
+        monthStats:     JSON.stringify(monthList),
+        bestDays:       JSON.stringify(bestDays),
+        worstDays:      JSON.stringify(worstDays),
+        conditionStats: JSON.stringify(conditionList),
     };
 
     await fsSave('backtest', docId, summary);
@@ -422,20 +472,22 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
         period,
-        chunk: chunk || 'full',
-        tradingDays: tradingDays.length,
-        stocksUsed:  Object.keys(allCandles).length,
+        chunk:          chunk || 'full',
+        tradingDays:    tradingDays.length,
+        stocksUsed:     Object.keys(allCandles).length,
         totalTrades,
         totalWins,
         totalLosses,
-        winRate:     summary.winRate,
-        totalPnL:    summary.totalPnL,
-        avgDailyPnL: summary.avgDailyPnL,
-        topStocks:   stockList.slice(0, 10),
-        signalStats: signalList,
-        monthStats:  monthList,
+        winRate:        summary.winRate,
+        totalPnL:       summary.totalPnL,
+        avgDailyPnL:    summary.avgDailyPnL,
+        topStocks:      stockList.slice(0, 10),
+        signalStats:    signalList,
+        monthStats:     monthList,
         bestDays,
         worstDays,
+        topConditions:  conditionList.slice(0, 15),
+        worstConditions: conditionList.slice(-10).reverse(),
         message: chunk ? `Chunk ${chunk} saved. Run next chunk or ?chunk=merge when all done.` : 'Full backtest complete.',
     });
 }
@@ -484,11 +536,11 @@ async function mergechunks(period: string): Promise<NextResponse> {
             }
         };
 
-        try { merge(stockMap,  JSON.parse(c.stockStats  || '[]')); } catch {}
-        try { merge(signalMap, JSON.parse(c.signalStats || '[]')); } catch {}
-        try { merge(monthMap,  JSON.parse(c.monthStats  || '[]')); } catch {}
-        try { allBest.push(...JSON.parse(c.bestDays   || '[]')); } catch {}
-        try { allWorst.push(...JSON.parse(c.worstDays  || '[]')); } catch {}
+        try { merge(stockMap,  JSON.parse(String(c.stockStats  || '[]'))); } catch {}
+        try { merge(signalMap, JSON.parse(String(c.signalStats || '[]'))); } catch {}
+        try { merge(monthMap,  JSON.parse(String(c.monthStats  || '[]'))); } catch {}
+        try { allBest.push(...JSON.parse(String(c.bestDays   || '[]'))); } catch {}
+        try { allWorst.push(...JSON.parse(String(c.worstDays  || '[]'))); } catch {}
     }
 
     const finalize = (map: Record<string, any>) =>
