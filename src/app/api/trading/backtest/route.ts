@@ -1,24 +1,25 @@
 /**
- * Backtest Engine — 30 days of historical simulation
+ * Backtest Engine — up to 3 years of historical simulation
  *
- * Replays the signal engine against real historical candles for each
- * trading day. Every simulated trade is saved to Firestore exactly like
- * a live trade so the learning layer has real data to work with.
+ * Efficient design:
+ * - Fetches all candles once per stock (single Yahoo call per stock)
+ * - Processes everything in memory — no per-candle API calls
+ * - Saves aggregated stats to Firestore, not individual trades
+ *   (per-day summary, per-stock performance, per-signal-type stats)
  *
- * POST ?days=30   — run full backtest
- * GET             — fetch backtest summary
+ * POST ?period=6m|1y|3y   — run backtest
+ * GET  ?period=6m|1y|3y   — fetch saved results
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { WATCHLIST, WatchStock, RISK_PROFILES, PaperTrade } from '@/lib/trading/paper-engine';
-import { calculateCharges } from '@/lib/trading/charge-calculator';
+import { WATCHLIST, WatchStock, RISK_PROFILES } from '@/lib/trading/paper-engine';
+import { calculateCharges, isTradeWorthTaking } from '@/lib/trading/charge-calculator';
 import { applySlippage } from '@/lib/trading/kite-candles';
-import { Candle, calculateATR, findSwingLevels, detectHunt, getMarketPhase } from '@/lib/trading/hunt-detector';
+import { Candle, calculateATR, findSwingLevels, detectHunt } from '@/lib/trading/hunt-detector';
 import { runAllPatterns } from '@/lib/trading/pattern-library';
-import { isTradeWorthTaking } from '@/lib/trading/charge-calculator';
 
-export const dynamic   = 'force-dynamic';
-export const maxDuration = 300; // 5 min — needs time for 30 days
+export const dynamic    = 'force-dynamic';
+export const maxDuration = 300;
 
 // ── Firestore ──────────────────────────────────────────────────────────────────
 
@@ -52,103 +53,103 @@ async function fsGet(collection: string, docId: string) {
     return out;
 }
 
-// ── Yahoo Finance historical candles ───────────────────────────────────────────
+// ── Yahoo Finance ──────────────────────────────────────────────────────────────
 
-async function fetchDailyCandles(symbol: string, days: number): Promise<Candle[]> {
+async function fetchCandles(symbol: string, range: string): Promise<Candle[]> {
     try {
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${days + 10}d&includePrePost=false`;
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${range}&includePrePost=false`;
         const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
         const json = await res.json();
         const result = json?.chart?.result?.[0];
         if (!result) return [];
         const timestamps = result.timestamp || [];
         const q = result.indicators?.quote?.[0] || {};
-        const candles: Candle[] = [];
-        for (let i = 0; i < timestamps.length; i++) {
-            if (!q.open?.[i] || !q.close?.[i]) continue;
-            candles.push({
-                time:   timestamps[i] * 1000,
-                open:   q.open[i],
-                high:   q.high[i],
-                low:    q.low[i],
-                close:  q.close[i],
-                volume: q.volume?.[i] || 0,
-            });
-        }
-        return candles;
+        return timestamps.map((t: number, i: number) => ({
+            time:   t * 1000,
+            open:   q.open?.[i]   || 0,
+            high:   q.high?.[i]   || 0,
+            low:    q.low?.[i]    || 0,
+            close:  q.close?.[i]  || 0,
+            volume: q.volume?.[i] || 0,
+        })).filter((c: Candle) => c.open > 0 && c.close > 0);
     } catch { return []; }
 }
 
-// ── Signal generation from historical candles (no live fetch) ──────────────────
+// ── Signal generation ──────────────────────────────────────────────────────────
 
-interface BacktestSignal {
-    direction: 'long' | 'short';
-    entryPrice: number;
-    stopPrice: number;
-    targetPrice: number;
-    signalDetail: string;
+type SignalType = 'gap' | 'hunt' | 'pattern' | 'momentum' | 'none';
+
+interface Signal {
+    type:       SignalType;
+    direction:  'long' | 'short';
     confidence: 'high' | 'medium' | 'low';
+    detail:     string;
+    entryPrice: number;
+    stopPrice:  number;
+    targetPrice: number;
 }
 
-function generateSignalFromCandles(
-    candles: Candle[],
+function generateSignal(
+    contextCandles: Candle[], // last 15 daily candles for pattern context
     profile: { stopPercent: number; targetMultiple: number },
-    dayCandles: Candle[], // full day candles for context
-): BacktestSignal | null {
-    if (candles.length < 10) return null;
+): Signal | null {
+    if (contextCandles.length < 10) return null;
 
-    const last     = candles[candles.length - 1];
-    const levels   = findSwingLevels(candles, 3);
-    const atr      = calculateATR(candles);
-    const hunt     = detectHunt(candles, levels);
-    const patterns = runAllPatterns(candles);
+    const last    = contextCandles[contextCandles.length - 1];
+    const prev    = contextCandles[contextCandles.length - 2];
+    const levels  = findSwingLevels(contextCandles, 3);
+    const hunt    = detectHunt(contextCandles, levels);
+    const patterns = runAllPatterns(contextCandles);
 
-    let direction: 'long' | 'short' | null = null;
+    let type:       SignalType = 'none';
+    let direction:  'long' | 'short' | null = null;
     let confidence: 'high' | 'medium' | 'low' = 'low';
-    let signalDetail = '';
-    let stopPrice  = 0;
+    let detail      = '';
+    let stopPrice   = 0;
     let targetPrice = 0;
 
-    // Gap signal
-    const prevClose   = candles[candles.length - 6]?.close || last.open;
-    const gapPct      = (last.open - prevClose) / prevClose * 100;
-    const candleRange = (last.high - last.low) / last.open * 100;
-    const candleBody  = Math.abs(last.close - last.open) / last.open * 100;
-
+    // 1. Gap signal — open vs prev close
+    const gapPct = prev.close > 0 ? (last.open - prev.close) / prev.close * 100 : 0;
     if (Math.abs(gapPct) >= 1.5) {
-        direction    = gapPct < 0 ? 'short' : 'long';
-        signalDetail = `Gap ${gapPct > 0 ? 'up' : 'down'} ${Math.abs(gapPct).toFixed(1)}%`;
-        confidence   = Math.abs(gapPct) >= 2.5 ? 'high' : 'medium';
-        stopPrice    = direction === 'long' ? last.low * 0.998 : last.high * 1.002;
+        type       = 'gap';
+        direction  = gapPct < 0 ? 'short' : 'long';
+        detail     = `Gap ${gapPct > 0 ? 'up' : 'down'} ${Math.abs(gapPct).toFixed(1)}%`;
+        confidence = Math.abs(gapPct) >= 2.5 ? 'high' : 'medium';
+        stopPrice  = direction === 'long' ? last.low * 0.998 : last.high * 1.002;
     }
 
-    // Hunt
-    if (!direction && hunt.detected) {
-        direction    = hunt.type === 'long_hunt' ? 'long' : 'short';
-        confidence   = hunt.confidence as any;
-        signalDetail = hunt.reason;
-        stopPrice    = hunt.structuralStop || last.close * (1 - (direction === 'long' ? 1 : -1) * profile.stopPercent / 100);
+    // 2. Hunt signal
+    if (type === 'none' && hunt.detected && hunt.confidence !== 'low') {
+        type       = 'hunt';
+        direction  = hunt.type === 'long_hunt' ? 'long' : 'short';
+        confidence = hunt.confidence as 'high' | 'medium';
+        detail     = hunt.reason;
+        stopPrice  = hunt.structuralStop || last.close * (1 - (direction === 'long' ? 1 : -1) * profile.stopPercent / 100);
     }
 
-    // Pattern
-    if (!direction && patterns.length > 0 && patterns[0].strength >= 2 && patterns[0].direction !== 'neutral') {
-        const best   = patterns[0];
-        direction    = best.direction as 'long' | 'short';
-        signalDetail = best.description;
-        confidence   = best.strength >= 4 ? 'high' : best.strength === 3 ? 'medium' : 'low';
-        stopPrice    = best.stopZone.price || last.close * (1 - profile.stopPercent / 100);
-        targetPrice  = best.targetZone.price;
+    // 3. Pattern signal
+    if (type === 'none' && patterns.length > 0) {
+        const best = patterns[0];
+        if (best.strength >= 3 && best.direction !== 'neutral') {
+            type       = 'pattern';
+            direction  = best.direction as 'long' | 'short';
+            detail     = best.description;
+            confidence = best.strength >= 4 ? 'high' : 'medium';
+            stopPrice  = best.stopZone.price || last.close * (1 - profile.stopPercent / 100);
+            targetPrice = best.targetZone.price;
+        }
     }
 
-    // Momentum fallback
-    if (!direction && candles.length >= 5) {
-        const prev5 = candles[candles.length - 5];
-        const move  = (last.close - prev5.close) / prev5.close * 100;
-        if (Math.abs(move) >= 1.5) {
-            direction    = move > 0 ? 'long' : 'short';
-            signalDetail = `Momentum ${move > 0 ? '+' : ''}${move.toFixed(1)}%`;
-            confidence   = Math.abs(move) >= 2.5 ? 'high' : 'medium';
-            stopPrice    = direction === 'long'
+    // 4. Momentum fallback — 5-day move >= 2%
+    if (type === 'none' && contextCandles.length >= 6) {
+        const prev5 = contextCandles[contextCandles.length - 6];
+        const move  = prev5.close > 0 ? (last.close - prev5.close) / prev5.close * 100 : 0;
+        if (Math.abs(move) >= 2.0) {
+            type       = 'momentum';
+            direction  = move > 0 ? 'long' : 'short';
+            detail     = `Momentum ${move > 0 ? '+' : ''}${move.toFixed(1)}% over 5 days`;
+            confidence = Math.abs(move) >= 3.5 ? 'high' : 'medium';
+            stopPrice  = direction === 'long'
                 ? last.close * (1 - profile.stopPercent / 100)
                 : last.close * (1 + profile.stopPercent / 100);
         }
@@ -156,75 +157,61 @@ function generateSignalFromCandles(
 
     if (!direction) return null;
 
-    const entryPrice = applySlippage(last.close, direction === 'long' ? 'buy' : 'sell');
-    const stopPct    = Math.abs(entryPrice - stopPrice) / entryPrice * 100;
+    const entryPrice  = applySlippage(last.close, direction === 'long' ? 'buy' : 'sell');
+    const stopPct     = Math.abs(entryPrice - stopPrice) / entryPrice * 100 || profile.stopPercent;
+
     if (!targetPrice) {
         const tgtPct = stopPct * profile.targetMultiple;
         targetPrice  = direction === 'long'
             ? entryPrice * (1 + tgtPct / 100)
             : entryPrice * (1 - tgtPct / 100);
     }
-    const tgtPct  = Math.abs(entryPrice - targetPrice) / entryPrice * 100;
-    const rr      = tgtPct / (stopPct || 1);
-    if (rr < 1.5) return null;
 
-    return { direction, entryPrice, stopPrice, targetPrice, signalDetail, confidence };
+    const tgtPct = Math.abs(entryPrice - targetPrice) / entryPrice * 100;
+    if (tgtPct / stopPct < 1.5) return null;
+
+    return { type, direction, confidence, detail, entryPrice, stopPrice, targetPrice };
 }
 
-// ── Simulate exit against day candles ─────────────────────────────────────────
+// ── Exit simulation ────────────────────────────────────────────────────────────
 
-function simulateExitHistory(
-    signal: BacktestSignal,
-    quantity: number,
-    dayCandles: Candle[], // intraday candles after entry
-    holdType: 'intraday' | 'delivery',
-): { exitPrice: number; exitReason: string; grossPnL: number; charges: number; netPnL: number; netPnLPercent: number } {
-    let exitPrice  = 0;
-    let exitReason = 'eod_exit';
+interface ExitResult {
+    exitPrice:  number;
+    exitReason: 'hit_target' | 'hit_stop' | 'eod_exit';
+    netPnL:     number;
+    charges:    number;
+    pnlPct:     number;
+}
 
-    for (const c of dayCandles) {
-        if (signal.direction === 'long') {
-            if (c.low  <= signal.stopPrice)   { exitPrice = signal.stopPrice;  exitReason = 'hit_stop';   break; }
-            if (c.high >= signal.targetPrice) { exitPrice = signal.targetPrice; exitReason = 'hit_target'; break; }
-        } else {
-            if (c.high >= signal.stopPrice)   { exitPrice = signal.stopPrice;  exitReason = 'hit_stop';   break; }
-            if (c.low  <= signal.targetPrice) { exitPrice = signal.targetPrice; exitReason = 'hit_target'; break; }
-        }
+function simulateExit(signal: Signal, quantity: number, dayCandle: Candle): ExitResult {
+    let exitPrice  = dayCandle.close;
+    let exitReason: ExitResult['exitReason'] = 'eod_exit';
+
+    if (signal.direction === 'long') {
+        if (dayCandle.low  <= signal.stopPrice)   { exitPrice = signal.stopPrice;  exitReason = 'hit_stop'; }
+        if (dayCandle.high >= signal.targetPrice) { exitPrice = signal.targetPrice; exitReason = 'hit_target'; }
+    } else {
+        if (dayCandle.high >= signal.stopPrice)   { exitPrice = signal.stopPrice;  exitReason = 'hit_stop'; }
+        if (dayCandle.low  <= signal.targetPrice) { exitPrice = signal.targetPrice; exitReason = 'hit_target'; }
     }
 
-    if (!exitPrice) exitPrice = dayCandles[dayCandles.length - 1]?.close || signal.entryPrice;
     exitPrice = applySlippage(exitPrice, signal.direction === 'long' ? 'sell' : 'buy');
-
     const buyP  = signal.direction === 'long' ? signal.entryPrice : exitPrice;
     const sellP = signal.direction === 'long' ? exitPrice : signal.entryPrice;
-    const c     = calculateCharges({ buyPrice: buyP, sellPrice: sellP, quantity, type: holdType });
+    const c     = calculateCharges({ buyPrice: buyP, sellPrice: sellP, quantity, type: 'intraday' });
 
-    return {
-        exitPrice,
-        exitReason,
-        grossPnL:      c.netPnL + c.total,
-        charges:       c.total,
-        netPnL:        c.netPnL,
-        netPnLPercent: c.effectivePnLPercent,
-    };
+    return { exitPrice, exitReason, netPnL: c.netPnL, charges: c.total, pnlPct: c.effectivePnLPercent };
 }
 
-// ── Trading day calendar ────────────────────────────────────────────────────────
+// ── Trading day helpers ────────────────────────────────────────────────────────
 
-function getTradingDays(numDays: number): string[] {
-    const days: string[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let cursor = new Date(today);
-    cursor.setDate(cursor.getDate() - 1); // start from yesterday
+function isWeekday(date: Date): boolean {
+    const d = date.getDay();
+    return d !== 0 && d !== 6;
+}
 
-    while (days.length < numDays) {
-        if (cursor.getDay() !== 0 && cursor.getDay() !== 6) {
-            days.push(cursor.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
-        }
-        cursor.setDate(cursor.getDate() - 1);
-    }
-    return days;
+function dateStr(ts: number): string {
+    return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
@@ -233,150 +220,320 @@ function isAuthorized(req: NextRequest): boolean {
     return req.headers.get('x-trading-secret') === process.env.TRADING_SECRET;
 }
 
-// ── GET — summary ──────────────────────────────────────────────────────────────
+// ── GET ────────────────────────────────────────────────────────────────────────
 
-export async function GET() {
-    const doc = await fsGet('backtest', 'summary');
-    if (!doc) return NextResponse.json({ message: 'No backtest run yet. POST to start.' });
-    return NextResponse.json(doc);
+export async function GET(req: NextRequest) {
+    const period = new URL(req.url).searchParams.get('period') || '6m';
+    const doc    = await fsGet('backtest', `summary_${period}`);
+    if (!doc) return NextResponse.json({ message: `No backtest for ${period} yet.` });
+    return NextResponse.json({
+        ...doc,
+        stockStats:  doc.stockStats  ? JSON.parse(doc.stockStats)  : [],
+        signalStats: doc.signalStats ? JSON.parse(doc.signalStats) : [],
+        monthStats:  doc.monthStats  ? JSON.parse(doc.monthStats)  : [],
+        worstDays:   doc.worstDays   ? JSON.parse(doc.worstDays)   : [],
+        bestDays:    doc.bestDays    ? JSON.parse(doc.bestDays)     : [],
+    });
 }
 
-// ── POST — run backtest ────────────────────────────────────────────────────────
+// ── POST — run ─────────────────────────────────────────────────────────────────
+// Supports chunked execution for long periods:
+//   POST ?period=3y&chunk=1   — months 1-3 (oldest)
+//   POST ?period=3y&chunk=2   — months 4-6
+//   ...up to chunk=12 for 3y (36 months in groups of 3)
+//   POST ?period=3y&chunk=merge — merge all chunks into final summary
 
 export async function POST(req: NextRequest) {
     if (!isAuthorized(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
-    const numDays = Math.min(parseInt(searchParams.get('days') || '30'), 30);
+    const period = searchParams.get('period') || '6m';
+    const chunk  = searchParams.get('chunk');  // null | '1'..'12' | 'merge'
 
-    const tradingDays = getTradingDays(numDays);
-    const stocks      = WATCHLIST as WatchStock[];
+    // If chunk=merge, combine all saved chunk docs into a final summary
+    if (chunk === 'merge') {
+        return mergechunks(period);
+    }
 
-    // Fetch 60d daily candles for all stocks upfront (batch of 10)
+    const yahooRange = period === '3y' ? '3y' : period === '1y' ? '1y' : '6mo';
+
+    // ── Step 1: Fetch all candles for all stocks (parallel batches of 8) ──────
+    const stocks = WATCHLIST as WatchStock[];
     const allCandles: Record<string, Candle[]> = {};
-    const BATCH = 10;
+
+    const BATCH = 8;
     for (let i = 0; i < stocks.length; i += BATCH) {
         const batch = stocks.slice(i, i + BATCH);
         await Promise.all(batch.map(async (stock) => {
-            const candles = await fetchDailyCandles(stock.symbol, 65);
+            const candles = await fetchCandles(stock.symbol, yahooRange);
             if (candles.length >= 20) allCandles[stock.nseSymbol] = candles;
         }));
     }
 
-    // Stats
-    let totalTrades = 0, totalWins = 0, totalLosses = 0, totalNetPnL = 0;
-    const dayResults: Record<string, { trades: number; wins: number; losses: number; netPnL: number }> = {};
+    // ── Step 2: Build trading day list from candle timestamps ─────────────────
+    const allDates = new Set<string>();
+    for (const candles of Object.values(allCandles)) {
+        for (const c of candles) allDates.add(dateStr(c.time));
+    }
+    let tradingDays = Array.from(allDates).sort();
 
-    // Simulate each trading day
+    // If chunk param provided, slice the day list into groups of ~3 months
+    if (chunk && chunk !== 'merge') {
+        const chunkIdx  = parseInt(chunk, 10) - 1; // 0-based
+        const chunkSize = period === '3y' ? Math.ceil(tradingDays.length / 12)
+                        : period === '1y' ? Math.ceil(tradingDays.length / 4)
+                        : tradingDays.length; // 6m: no chunking needed
+        const start = chunkIdx * chunkSize;
+        tradingDays = tradingDays.slice(start, start + chunkSize);
+        if (tradingDays.length === 0) {
+            return NextResponse.json({ message: `Chunk ${chunk} is empty — all chunks done. Run ?chunk=merge` });
+        }
+    }
+
+    // ── Step 3: Simulate all trades in memory ─────────────────────────────────
+
+    // Aggregation buckets
+    const stockStats:  Record<string, { trades: number; wins: number; losses: number; pnl: number; signals: Record<string, number> }> = {};
+    const signalStats: Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
+    const monthStats:  Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
+    const dayStats:    Record<string, { trades: number; wins: number; losses: number; pnl: number }> = {};
+
+    let totalTrades = 0, totalWins = 0, totalLosses = 0, totalPnL = 0;
+
     for (const date of tradingDays) {
-        const dateMs    = new Date(date + 'T00:00:00+05:30').getTime();
-        const dayTrades: PaperTrade[] = [];
+        const dayProfileCounts: Record<string, number> = {};
 
         for (const stock of stocks) {
             const candles = allCandles[stock.nseSymbol];
-            if (!candles || candles.length < 15) continue;
+            if (!candles) continue;
 
-            // Find candle index for this date
-            const dayIdx = candles.findIndex(c => {
-                const d = new Date(c.time).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-                return d === date;
-            });
-            if (dayIdx < 10) continue;
+            // Find index for this date
+            const idx = candles.findIndex(c => dateStr(c.time) === date);
+            if (idx < 12) continue;
 
-            // Use candles up to + including this day's open as context
-            const contextCandles = candles.slice(dayIdx - 10, dayIdx + 1);
-            const dayCandle      = candles[dayIdx];
+            const context   = candles.slice(idx - 12, idx);     // 12 candles before = context
+            const dayCandle = candles[idx];                      // this day = execution + exit
 
             for (const profile of RISK_PROFILES) {
-                // Max trades per profile per day
-                const profileTrades = dayTrades.filter(t => t.riskProfile === profile.id);
-                if (profileTrades.length >= profile.maxTradesPerDay) continue;
+                const profileKey = profile.id;
+                if ((dayProfileCounts[profileKey] || 0) >= profile.maxTradesPerDay) continue;
 
-                // Already traded this stock+profile today
-                if (dayTrades.some(t => t.symbol === stock.nseSymbol && t.riskProfile === profile.id)) continue;
-
-                const signal = generateSignalFromCandles(contextCandles, profile, [dayCandle]);
+                const signal = generateSignal(context, profile);
                 if (!signal) continue;
 
                 // Position size
-                const riskAmt     = profile.capital * (profile.stopPercent / 100);
-                const riskPerShare = signal.entryPrice * (Math.abs(signal.entryPrice - signal.stopPrice) / signal.entryPrice);
-                const quantity    = Math.max(1, Math.floor(riskAmt / (riskPerShare || 1)));
+                const riskAmt      = profile.capital * (profile.stopPercent / 100);
+                const stopDist     = Math.abs(signal.entryPrice - signal.stopPrice);
+                const quantity     = Math.max(1, Math.floor(riskAmt / (stopDist || 1)));
 
-                // Worth taking after charges?
-                const tgtPct  = Math.abs(signal.entryPrice - signal.targetPrice) / signal.entryPrice * 100;
-                const worth   = isTradeWorthTaking({ entryPrice: signal.entryPrice, targetPercent: tgtPct, quantity, type: 'intraday' });
+                const exit = simulateExit(signal, quantity, dayCandle);
 
-                // Simulate exit using the day candle (high/low tells us if stop/target was hit)
-                const exit = simulateExitHistory(signal, quantity, [dayCandle], 'intraday');
+                // Aggregate
+                const month = date.slice(0, 7);
+                const isWin = exit.netPnL > 0;
 
-                const trade: PaperTrade = {
-                    id:                `${stock.nseSymbol}-${profile.id}-bt-${date}`,
-                    date,
-                    symbol:            stock.nseSymbol,
-                    sector:            stock.category,
-                    riskProfile:       profile.id,
-                    direction:         signal.direction,
-                    entryPrice:        signal.entryPrice,
-                    entryTime:         '09:30',
-                    stopPrice:         signal.stopPrice,
-                    targetPrice:       signal.targetPrice,
-                    quantity,
-                    exitPrice:         exit.exitPrice,
-                    exitTime:          '15:20',
-                    exitReason:        exit.exitReason as any,
-                    grossPnL:          exit.grossPnL,
-                    charges:           exit.charges,
-                    netPnL:            exit.netPnL,
-                    netPnLPercent:     exit.netPnLPercent,
-                    holdType:          'intraday',
-                    huntSignal:        signal.signalDetail,
-                    confidence:        signal.confidence,
-                    patternObservation: worth.worth ? '' : `Skipped: ${worth.reason}`,
+                if (!stockStats[stock.nseSymbol]) stockStats[stock.nseSymbol] = { trades: 0, wins: 0, losses: 0, pnl: 0, signals: {} };
+                if (!signalStats[signal.type])    signalStats[signal.type]    = { trades: 0, wins: 0, losses: 0, pnl: 0 };
+                if (!monthStats[month])           monthStats[month]           = { trades: 0, wins: 0, losses: 0, pnl: 0 };
+                if (!dayStats[date])              dayStats[date]              = { trades: 0, wins: 0, losses: 0, pnl: 0 };
+
+                const inc = (obj: any, win: boolean, pnl: number) => {
+                    obj.trades++; obj.pnl += pnl;
+                    if (win) obj.wins++; else obj.losses++;
                 };
 
-                dayTrades.push(trade);
+                inc(stockStats[stock.nseSymbol], isWin, exit.netPnL);
+                inc(signalStats[signal.type],    isWin, exit.netPnL);
+                inc(monthStats[month],           isWin, exit.netPnL);
+                inc(dayStats[date],              isWin, exit.netPnL);
+                stockStats[stock.nseSymbol].signals[signal.type] = (stockStats[stock.nseSymbol].signals[signal.type] || 0) + 1;
 
-                // Save to Firestore
-                await fsSave('paper_trading', trade.id, trade as any);
-
-                totalTrades++;
-                if ((exit.netPnL || 0) > 0) totalWins++;
-                else totalLosses++;
-                totalNetPnL += exit.netPnL || 0;
+                dayProfileCounts[profileKey] = (dayProfileCounts[profileKey] || 0) + 1;
+                totalTrades++; totalPnL += exit.netPnL;
+                if (isWin) totalWins++; else totalLosses++;
             }
         }
-
-        dayResults[date] = {
-            trades: dayTrades.length,
-            wins:   dayTrades.filter(t => (t.netPnL || 0) > 0).length,
-            losses: dayTrades.filter(t => (t.netPnL || 0) <= 0).length,
-            netPnL: Math.round(dayTrades.reduce((s, t) => s + (t.netPnL || 0), 0) * 100) / 100,
-        };
     }
 
-    // Save summary
+    // ── Step 4: Prepare ranked outputs ───────────────────────────────────────
+
+    const stockList = Object.entries(stockStats).map(([symbol, s]) => ({
+        symbol,
+        trades:  s.trades,
+        wins:    s.wins,
+        losses:  s.losses,
+        winRate: Math.round(s.wins / s.trades * 100),
+        pnl:     Math.round(s.pnl),
+        bestSignal: Object.entries(s.signals).sort((a,b) => b[1]-a[1])[0]?.[0] || 'none',
+    })).sort((a, b) => b.pnl - a.pnl);
+
+    const signalList = Object.entries(signalStats).map(([type, s]) => ({
+        type,
+        trades:  s.trades,
+        wins:    s.wins,
+        losses:  s.losses,
+        winRate: Math.round(s.wins / s.trades * 100),
+        pnl:     Math.round(s.pnl),
+        avgPnl:  Math.round(s.pnl / s.trades),
+    })).sort((a, b) => b.pnl - a.pnl);
+
+    const monthList = Object.entries(monthStats).map(([month, s]) => ({
+        month,
+        trades:  s.trades,
+        wins:    s.wins,
+        losses:  s.losses,
+        winRate: Math.round(s.wins / s.trades * 100),
+        pnl:     Math.round(s.pnl),
+    })).sort((a, b) => a.month.localeCompare(b.month));
+
+    const sortedDays  = Object.entries(dayStats).sort((a, b) => b[1].pnl - a[1].pnl);
+    const bestDays    = sortedDays.slice(0, 10).map(([date, s]) => ({ date, ...s, pnl: Math.round(s.pnl) }));
+    const worstDays   = sortedDays.slice(-10).reverse().map(([date, s]) => ({ date, ...s, pnl: Math.round(s.pnl) }));
+
+    // ── Step 5: Save to Firestore ─────────────────────────────────────────────
+
+    const docId = chunk ? `chunk_${period}_${chunk}` : `summary_${period}`;
+
     const summary = {
+        period,
+        chunk:        chunk || 'full',
+        runAt:        new Date().toISOString(),
+        tradingDays:  tradingDays.length,
+        stocksUsed:   Object.keys(allCandles).length,
+        totalTrades,
+        totalWins,
+        totalLosses,
+        winRate:      totalTrades > 0 ? Math.round(totalWins / totalTrades * 100) : 0,
+        totalPnL:     Math.round(totalPnL),
+        avgDailyPnL:  tradingDays.length > 0 ? Math.round(totalPnL / tradingDays.length) : 0,
+        stockStats:   JSON.stringify(stockList),
+        signalStats:  JSON.stringify(signalList),
+        monthStats:   JSON.stringify(monthList),
+        bestDays:     JSON.stringify(bestDays),
+        worstDays:    JSON.stringify(worstDays),
+    };
+
+    await fsSave('backtest', docId, summary);
+
+    // If no chunk (full run for 6m), also save as summary
+    if (!chunk) {
+        await fsSave('backtest', `summary_${period}`, summary);
+    }
+
+    return NextResponse.json({
+        period,
+        chunk: chunk || 'full',
+        tradingDays: tradingDays.length,
+        stocksUsed:  Object.keys(allCandles).length,
+        totalTrades,
+        totalWins,
+        totalLosses,
+        winRate:     summary.winRate,
+        totalPnL:    summary.totalPnL,
+        avgDailyPnL: summary.avgDailyPnL,
+        topStocks:   stockList.slice(0, 10),
+        signalStats: signalList,
+        monthStats:  monthList,
+        bestDays,
+        worstDays,
+        message: chunk ? `Chunk ${chunk} saved. Run next chunk or ?chunk=merge when all done.` : 'Full backtest complete.',
+    });
+}
+
+// ── Merge all chunks into final summary ───────────────────────────────────────
+
+async function mergechunks(period: string): Promise<NextResponse> {
+    const maxChunks = period === '3y' ? 12 : period === '1y' ? 4 : 1;
+    const chunks: any[] = [];
+
+    for (let i = 1; i <= maxChunks; i++) {
+        const doc = await fsGet('backtest', `chunk_${period}_${i}`);
+        if (doc) chunks.push(doc);
+    }
+
+    if (chunks.length === 0) {
+        return NextResponse.json({ error: 'No chunks found. Run chunks first.' }, { status: 400 });
+    }
+
+    // Merge stock stats
+    const stockMap: Record<string, any> = {};
+    const signalMap: Record<string, any> = {};
+    const monthMap: Record<string, any> = {};
+    const allBest: any[] = [];
+    const allWorst: any[] = [];
+
+    let totalTrades = 0, totalWins = 0, totalLosses = 0, totalPnL = 0, totalDays = 0;
+
+    for (const c of chunks) {
+        totalTrades  += Number(c.totalTrades)  || 0;
+        totalWins    += Number(c.totalWins)    || 0;
+        totalLosses  += Number(c.totalLosses)  || 0;
+        totalPnL     += Number(c.totalPnL)     || 0;
+        totalDays    += Number(c.tradingDays)  || 0;
+
+        const merge = (map: Record<string, any>, list: any[]) => {
+            for (const item of list) {
+                const key = item.symbol || item.type || item.month;
+                if (!map[key]) map[key] = { ...item };
+                else {
+                    map[key].trades  = (map[key].trades  || 0) + (item.trades  || 0);
+                    map[key].wins    = (map[key].wins    || 0) + (item.wins    || 0);
+                    map[key].losses  = (map[key].losses  || 0) + (item.losses  || 0);
+                    map[key].pnl     = (map[key].pnl     || 0) + (item.pnl     || 0);
+                }
+            }
+        };
+
+        try { merge(stockMap,  JSON.parse(c.stockStats  || '[]')); } catch {}
+        try { merge(signalMap, JSON.parse(c.signalStats || '[]')); } catch {}
+        try { merge(monthMap,  JSON.parse(c.monthStats  || '[]')); } catch {}
+        try { allBest.push(...JSON.parse(c.bestDays   || '[]')); } catch {}
+        try { allWorst.push(...JSON.parse(c.worstDays  || '[]')); } catch {}
+    }
+
+    const finalize = (map: Record<string, any>) =>
+        Object.values(map).map((s: any) => ({
+            ...s,
+            winRate: s.trades > 0 ? Math.round(s.wins / s.trades * 100) : 0,
+            pnl: Math.round(s.pnl),
+        }));
+
+    const stockList  = finalize(stockMap).sort((a: any, b: any) => b.pnl - a.pnl);
+    const signalList = finalize(signalMap).sort((a: any, b: any) => b.pnl - a.pnl);
+    const monthList  = finalize(monthMap).sort((a: any, b: any) => String(a.month).localeCompare(String(b.month)));
+    const bestDays   = allBest.sort((a: any, b: any) => b.pnl - a.pnl).slice(0, 10);
+    const worstDays  = allWorst.sort((a: any, b: any) => a.pnl - b.pnl).slice(0, 10);
+
+    const merged = {
+        period,
+        chunk:       'merged',
         runAt:       new Date().toISOString(),
-        days:        numDays,
+        chunksUsed:  chunks.length,
+        tradingDays: totalDays,
         totalTrades,
         totalWins,
         totalLosses,
         winRate:     totalTrades > 0 ? Math.round(totalWins / totalTrades * 100) : 0,
-        totalNetPnL: Math.round(totalNetPnL * 100) / 100,
-        dayResults:  JSON.stringify(dayResults),
+        totalPnL:    Math.round(totalPnL),
+        avgDailyPnL: totalDays > 0 ? Math.round(totalPnL / totalDays) : 0,
+        stockStats:  JSON.stringify(stockList),
+        signalStats: JSON.stringify(signalList),
+        monthStats:  JSON.stringify(monthList),
+        bestDays:    JSON.stringify(bestDays),
+        worstDays:   JSON.stringify(worstDays),
     };
-    await fsSave('backtest', 'summary', summary);
+
+    await fsSave('backtest', `summary_${period}`, merged);
 
     return NextResponse.json({
-        success: true,
-        days: numDays,
-        stocksUsed: Object.keys(allCandles).length,
+        message:     `Merged ${chunks.length} chunks into summary_${period}`,
+        period,
+        tradingDays: totalDays,
         totalTrades,
-        totalWins,
-        totalLosses,
-        winRate: summary.winRate,
-        totalNetPnL: summary.totalNetPnL,
-        dayResults,
+        winRate:     merged.winRate,
+        totalPnL:    merged.totalPnL,
+        topStocks:   stockList.slice(0, 10),
+        signalStats: signalList,
+        monthStats:  monthList,
     });
 }
