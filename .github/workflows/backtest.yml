@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+      APP_URL: ${{ secrets.VERCEL_APP_URL }}
       TRADING_SECRET: ${{ secrets.TRADING_SECRET }}
     steps:
       - name: Run 6m backtest
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+      APP_URL: ${{ secrets.VERCEL_APP_URL }}
       TRADING_SECRET: ${{ secrets.TRADING_SECRET }}
     steps:
       - name: Chunk 1 (months 1-3)
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+      APP_URL: ${{ secrets.VERCEL_APP_URL }}
       TRADING_SECRET: ${{ secrets.TRADING_SECRET }}
     steps:
       - name: Chunk 1
