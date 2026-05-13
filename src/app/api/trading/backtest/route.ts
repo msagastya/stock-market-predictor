@@ -17,6 +17,7 @@ import { calculateCharges, isTradeWorthTaking } from '@/lib/trading/charge-calcu
 import { applySlippage } from '@/lib/trading/kite-candles';
 import { Candle, calculateATR, findSwingLevels, detectHunt } from '@/lib/trading/hunt-detector';
 import { runAllPatterns } from '@/lib/trading/pattern-library';
+import { getDayConditions, conditionLabel } from '@/lib/trading/calendar-conditions';
 
 export const dynamic    = 'force-dynamic';
 export const maxDuration = 300;
@@ -319,14 +320,14 @@ export async function POST(req: NextRequest) {
         const mktPrev = mktIdx >= 1 ? anyCandles[mktIdx - 1] : null;
         const mktGapPct = mktDay && mktPrev ? (mktDay.open - mktPrev.close) / mktPrev.close * 100 : 0;
         const mktDayMove = mktDay ? (mktDay.close - mktDay.open) / mktDay.open * 100 : 0;
-        // Market regime: strong_up, strong_down, choppy, trending_up, trending_down
         const mktRegime = Math.abs(mktGapPct) >= 1.5
             ? (mktGapPct > 0 ? 'gap_up_day' : 'gap_down_day')
             : Math.abs(mktDayMove) >= 1.0
             ? (mktDayMove > 0 ? 'trending_up' : 'trending_down')
             : 'choppy';
-        // Day of week
-        const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(date).getDay()];
+
+        // Full calendar conditions for this date
+        const cal = getDayConditions(date);
 
         for (const stock of stocks) {
             const candles = allCandles[stock.nseSymbol];
@@ -357,14 +358,28 @@ export async function POST(req: NextRequest) {
                 const month = date.slice(0, 7);
                 const isWin = exit.netPnL > 0;
 
-                // Track condition patterns
+                // ── Track all condition patterns ──────────────────────────────
+                // Market regime
                 trackCondition(`regime_${mktRegime}`, `Market regime: ${mktRegime}`, isWin, exit.netPnL);
-                trackCondition(`signal_${signal.type}_${mktRegime}`, `${signal.type} signal on ${mktRegime} day`, isWin, exit.netPnL);
-                trackCondition(`direction_${signal.direction}_${mktRegime}`, `${signal.direction} trade on ${mktRegime}`, isWin, exit.netPnL);
-                trackCondition(`dow_${dow}`, `Day of week: ${dow}`, isWin, exit.netPnL);
-                trackCondition(`signal_${signal.type}`, `Signal type: ${signal.type}`, isWin, exit.netPnL);
-                trackCondition(`direction_${signal.direction}`, `Direction: ${signal.direction}`, isWin, exit.netPnL);
+                // Signal × regime (most important: what signal works in what market)
+                trackCondition(`${signal.type}_on_${mktRegime}`, `${signal.type} signal on ${mktRegime}`, isWin, exit.netPnL);
+                // Direction × regime (short on gap_down? long on trending_up?)
+                trackCondition(`${signal.direction}_on_${mktRegime}`, `${signal.direction} on ${mktRegime}`, isWin, exit.netPnL);
+                // Signal type alone
+                trackCondition(`signal_${signal.type}`, `Signal: ${signal.type}`, isWin, exit.netPnL);
+                // Direction alone
+                trackCondition(`dir_${signal.direction}`, `Direction: ${signal.direction}`, isWin, exit.netPnL);
+                // Confidence
                 trackCondition(`conf_${signal.confidence}`, `Confidence: ${signal.confidence}`, isWin, exit.netPnL);
+
+                // Calendar conditions — all tags from the calendar module
+                for (const tag of cal.tags) {
+                    trackCondition(tag, conditionLabel(tag), isWin, exit.netPnL);
+                    // Signal × calendar tag (e.g. "gap signal on weekly_expiry")
+                    trackCondition(`${signal.type}_${tag}`, `${signal.type} on ${conditionLabel(tag)}`, isWin, exit.netPnL);
+                    // Direction × calendar tag (e.g. "short on pre_festival_Diwali")
+                    trackCondition(`${signal.direction}_${tag}`, `${signal.direction} on ${conditionLabel(tag)}`, isWin, exit.netPnL);
+                }
 
                 if (!stockStats[stock.nseSymbol]) stockStats[stock.nseSymbol] = { trades: 0, wins: 0, losses: 0, pnl: 0, signals: {} };
                 if (!signalStats[signal.type])    signalStats[signal.type]    = { trades: 0, wins: 0, losses: 0, pnl: 0 };
