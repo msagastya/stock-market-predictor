@@ -1,0 +1,129 @@
+name: Run Backtests
+
+on:
+  workflow_dispatch:
+    inputs:
+      period:
+        description: 'Period to backtest'
+        required: true
+        default: '6m'
+        type: choice
+        options:
+          - 6m
+          - 1y
+          - 3y
+
+jobs:
+
+  # ── 6-month backtest — single shot ──────────────────────────────────────────
+  backtest-6m:
+    if: ${{ github.event.inputs.period == '6m' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+      TRADING_SECRET: ${{ secrets.TRADING_SECRET }}
+    steps:
+      - name: Run 6m backtest
+        run: |
+          echo "Running 6m backtest..."
+          curl -s -X POST \
+            "${APP_URL}/api/trading/backtest?period=6m" \
+            -H "x-trading-secret: ${TRADING_SECRET}" \
+            | jq '{period,tradingDays,totalTrades,winRate,totalPnL}'
+
+  # ── 1-year backtest — 4 chunks ───────────────────────────────────────────────
+  backtest-1y-chunks:
+    if: ${{ github.event.inputs.period == '1y' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+      TRADING_SECRET: ${{ secrets.TRADING_SECRET }}
+    steps:
+      - name: Chunk 1 (months 1-3)
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=1y&chunk=1" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 2 (months 4-6)
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=1y&chunk=2" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 3 (months 7-9)
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=1y&chunk=3" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 4 (months 10-12)
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=1y&chunk=4" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Merge all chunks
+        run: |
+          echo "Merging 1y chunks..."
+          curl -s -X POST "${APP_URL}/api/trading/backtest?period=1y&chunk=merge" \
+            -H "x-trading-secret: ${TRADING_SECRET}" \
+            | jq '{message,tradingDays,totalTrades,winRate,totalPnL}'
+
+  # ── 3-year backtest — 12 chunks ──────────────────────────────────────────────
+  backtest-3y-chunks:
+    if: ${{ github.event.inputs.period == '3y' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+      TRADING_SECRET: ${{ secrets.TRADING_SECRET }}
+    steps:
+      - name: Chunk 1
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=1" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 2
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=2" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 3
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=3" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 4
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=4" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 5
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=5" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 6
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=6" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 7
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=7" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 8
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=8" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 9
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=9" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 10
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=10" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 11
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=11" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Chunk 12
+        run: curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=12" -H "x-trading-secret: ${TRADING_SECRET}" | jq '{chunk,tradingDays,totalTrades,totalPnL}'
+      - name: Wait
+        run: sleep 30
+      - name: Merge all 12 chunks
+        run: |
+          echo "Merging 3y chunks..."
+          curl -s -X POST "${APP_URL}/api/trading/backtest?period=3y&chunk=merge" \
+            -H "x-trading-secret: ${TRADING_SECRET}" \
+            | jq '{message,tradingDays,totalTrades,winRate,totalPnL}'
