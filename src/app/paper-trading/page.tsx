@@ -23,6 +23,7 @@ interface MorningScan {
     date: string; dayBias: string; sectorPriority: string[];
     watchlist: ScoredStock[]; alerts: string[]; tradingPlan: string;
     keyLevels: { nifty: number; bankNifty: number; vix: number };
+    aiSentiment?: string; aiOpportunities?: string[]; aiRisks?: string[];
 }
 
 interface Summary {
@@ -153,12 +154,28 @@ export default function PaperTradingPage() {
                         <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 10 }}>{scan.tradingPlan}</div>
                     )}
                     {scan.alerts?.length > 0 && (
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
                             {scan.alerts.map((a, i) => (
                                 <span key={i} style={{ fontSize: 10, color: 'var(--amber)', background: 'var(--amber)11', border: '1px solid var(--amber)33', padding: '2px 8px', borderRadius: 4 }}>⚠ {a}</span>
                             ))}
                         </div>
                     )}
+                    {(scan.aiOpportunities?.length || scan.aiRisks?.length) ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
+                            {scan.aiOpportunities?.length ? (
+                                <div>
+                                    <div style={{ fontSize: 9, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Opportunities</div>
+                                    {scan.aiOpportunities.map((o, i) => <div key={i} style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 2 }}>› {o}</div>)}
+                                </div>
+                            ) : null}
+                            {scan.aiRisks?.length ? (
+                                <div>
+                                    <div style={{ fontSize: 9, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Risks</div>
+                                    {scan.aiRisks.map((r, i) => <div key={i} style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 2 }}>› {r}</div>)}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
                 </div>
             )}
 
@@ -251,7 +268,7 @@ export default function PaperTradingPage() {
                                             onClick={() => setExpandedStock(isOpen ? null : s.nseSymbol)}
                                             style={{
                                                 display: 'grid',
-                                                gridTemplateColumns: '32px 80px 1fr 60px 80px 80px 28px',
+                                                gridTemplateColumns: '32px 80px 1fr 60px 70px 70px 70px 28px',
                                                 alignItems: 'center',
                                                 gap: 12,
                                                 padding: '12px 16px',
@@ -276,8 +293,14 @@ export default function PaperTradingPage() {
                                                 <div style={{ fontSize: 9, color: '#64748b' }}>gap</div>
                                             </div>
                                             <div style={{ textAlign: 'center' }}>
+                                                <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 12, color: (s.momentum ?? 0) >= 0 ? '#34d399' : '#fb7185' }}>
+                                                    {s.momentum != null ? `${s.momentum >= 0 ? '+' : ''}${s.momentum.toFixed(1)}%` : '—'}
+                                                </div>
+                                                <div style={{ fontSize: 9, color: '#64748b' }}>momentum</div>
+                                            </div>
+                                            <div style={{ textAlign: 'center' }}>
                                                 <div style={{ fontSize: 11, fontWeight: 600, color: biasColor }}>{biasLabel}</div>
-                                                <div style={{ fontSize: 9, color: '#64748b' }}>global cue</div>
+                                                <div style={{ fontSize: 9, color: '#64748b' }}>cue</div>
                                             </div>
                                             <div style={{ fontSize: 12, color: '#64748b', textAlign: 'center' }}>{isOpen ? '▲' : '▼'}</div>
                                         </div>
