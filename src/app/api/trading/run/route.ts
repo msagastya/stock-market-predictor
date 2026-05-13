@@ -176,7 +176,21 @@ export async function POST(req: NextRequest) {
     if (mode === 'eod') {
         try {
             const trades = await fsListTrades(date);
-            const summary = buildDailySummary(trades, date);
+
+            // Force-close all open positions at last price
+            const openTrades = trades.filter(t => t.exitReason === 'open');
+            await Promise.all(openTrades.map(async (trade) => {
+                try {
+                    const candles = await fetchCandles(trade.symbol, trade.symbol, '15m', 1);
+                    if (candles.length === 0) return;
+                    const closed = simulateExit(trade, candles, now, true); // isEOD=true
+                    if (closed.exitReason !== 'open') await fsSaveTrade(closed);
+                } catch { /* skip */ }
+            }));
+
+            // Reload after closing
+            const allTrades = await fsListTrades(date);
+            const summary = buildDailySummary(allTrades, date);
 
             const scanDoc = await fsGet('morning_scan', date);
             const marketContext = {
@@ -187,7 +201,7 @@ export async function POST(req: NextRequest) {
 
             let aiReport = null;
             try {
-                aiReport = await generateDailyReport(summary, trades, marketContext);
+                aiReport = await generateDailyReport(summary, allTrades, marketContext);
                 await fsSave('morning_scan', `ai_report_${date}`, {
                     date,
                     headline: aiReport.headline,
@@ -268,9 +282,9 @@ export async function POST(req: NextRequest) {
                 profileCounts[t.riskProfile] = (profileCounts[t.riskProfile] || 0) + 1;
             }
 
-            // Scan top 20 stocks in parallel (5 at a time to avoid Kite rate limits)
-            const candidates = watchlist.slice(0, 20);
-            const BATCH = 5;
+            // Scan all 50 stocks in parallel batches of 8
+            const candidates = watchlist.slice(0, 50);
+            const BATCH = 8;
             for (let i = 0; i < candidates.length; i += BATCH) {
                 const batch = candidates.slice(i, i + BATCH);
                 await Promise.all(batch.map(async (stock) => {

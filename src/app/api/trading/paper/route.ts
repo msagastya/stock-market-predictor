@@ -37,9 +37,32 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ summaries });
         }
 
-        // Default: trades for date
-        const doc = await firestoreGet('paper_trading', `trades_${date}`);
-        const trades: PaperTrade[] = doc ? JSON.parse(doc.trades || '[]') : [];
+        // Default: trades for date — read both old array format and new individual docs
+        const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'stock-market-predictor-ace63';
+        const FIREBASE_API_KEY    = process.env.FIREBASE_API_KEY    || '';
+        const FS = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+
+        // New format: individual docs per trade
+        const listRes = await fetch(`${FS}/paper_trading?pageSize=200&key=${FIREBASE_API_KEY}`);
+        let trades: PaperTrade[] = [];
+        if (listRes.ok) {
+            const listJson = await listRes.json();
+            for (const d of (listJson.documents || [])) {
+                if (!d.fields) continue;
+                const t: any = {};
+                for (const [k, v] of Object.entries(d.fields as Record<string, any>)) {
+                    t[k] = v.stringValue ?? v.doubleValue ?? v.integerValue ?? v.booleanValue ?? null;
+                }
+                if (t.date === date && t.symbol) trades.push(t as PaperTrade);
+            }
+        }
+
+        // Old format fallback
+        if (trades.length === 0) {
+            const doc = await firestoreGet('paper_trading', `trades_${date}`);
+            trades = doc ? JSON.parse(doc.trades || '[]') : [];
+        }
+
         return NextResponse.json({ date, trades, count: trades.length });
 
     } catch (e: any) {

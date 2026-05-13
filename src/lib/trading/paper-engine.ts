@@ -26,9 +26,9 @@ export interface RiskProfile {
 }
 
 export const RISK_PROFILES: RiskProfile[] = [
-    { id: 'conservative', capital: 25000, stopPercent: 0.5,  targetMultiple: 2, maxTradesPerDay: 2, holdForDelivery: false },
-    { id: 'moderate',     capital: 40000, stopPercent: 0.8,  targetMultiple: 2.5, maxTradesPerDay: 3, holdForDelivery: true  },
-    { id: 'aggressive',   capital: 60000, stopPercent: 1.2,  targetMultiple: 3,   maxTradesPerDay: 4, holdForDelivery: true  },
+    { id: 'conservative', capital: 25000, stopPercent: 1.0,  targetMultiple: 2,   maxTradesPerDay: 3, holdForDelivery: false },
+    { id: 'moderate',     capital: 40000, stopPercent: 1.5,  targetMultiple: 2.5, maxTradesPerDay: 4, holdForDelivery: true  },
+    { id: 'aggressive',   capital: 60000, stopPercent: 2.0,  targetMultiple: 3,   maxTradesPerDay: 5, holdForDelivery: true  },
 ];
 
 // ── Paper trade record ─────────────────────────────────────────────────────────

@@ -105,52 +105,81 @@ export async function analyzeSignal(
     let stopPrice = 0;
     let targetPrice = 0;
 
-    // Hunt signal — highest priority (include low confidence so we don't miss setups)
-    if (hunt.detected) {
-        direction   = hunt.type === 'long_hunt' ? 'long' : 'short';
-        confidence  = hunt.confidence as 'high' | 'medium' | 'low';
-        signalType  = 'hunt';
+    // Gap play — highest priority on big gap days
+    // If stock gapped >1.5% at open, trade the gap direction (continuation) or fade it (reversal)
+    const firstCandle  = candles15m[candles15m.length - (phase.istHour === 9 ? 1 : Math.min(candles15m.length - 1, 4))];
+    const prevDayClose = candles15m[candles15m.length - 5]?.close || last.close;
+    const gapPct       = (last.open - prevDayClose) / prevDayClose * 100;
+    const candleBody   = Math.abs(last.close - last.open) / last.open * 100;
+    const candleRange  = (last.high - last.low) / last.open * 100;
+
+    if (Math.abs(gapPct) >= 1.5) {
+        // First 30 min: trade gap direction (continuation)
+        if (phase.istHour === 9 && phase.istMinute <= 45) {
+            direction    = gapPct < 0 ? 'short' : 'long';
+            signalType   = 'trend_continuation';
+            signalDetail = `Gap ${gapPct > 0 ? 'up' : 'down'} ${Math.abs(gapPct).toFixed(1)}% — riding gap direction`;
+            confidence   = Math.abs(gapPct) >= 2.5 ? 'high' : 'medium';
+            stopPrice    = direction === 'long'
+                ? last.low * 0.998
+                : last.high * 1.002;
+        }
+        // After 30 min: fade the gap if candle shows reversal (small body, long wick back toward prev close)
+        else if (candleRange >= 1.0 && candleBody < candleRange * 0.4) {
+            direction    = gapPct < 0 ? 'long' : 'short'; // fade direction
+            signalType   = 'momentum_exhaustion';
+            signalDetail = `Gap fade — ${Math.abs(gapPct).toFixed(1)}% gap showing exhaustion, reverting`;
+            confidence   = 'medium';
+            stopPrice    = direction === 'long'
+                ? last.low * 0.998
+                : last.high * 1.002;
+        }
+    }
+
+    // Hunt signal
+    if (!signalType && hunt.detected) {
+        direction    = hunt.type === 'long_hunt' ? 'long' : 'short';
+        confidence   = hunt.confidence as 'high' | 'medium' | 'low';
+        signalType   = 'hunt';
         signalDetail = hunt.reason;
-        stopPrice   = hunt.structuralStop || (direction === 'long'
+        stopPrice    = hunt.structuralStop || (direction === 'long'
             ? last.close * (1 - profile.stopPercent / 100)
             : last.close * (1 + profile.stopPercent / 100));
     }
 
-    // Pattern signals — allow strength >= 2 so more patterns qualify
+    // Pattern signals
     if (!signalType && patterns.length > 0) {
         const best = patterns[0];
         if (best.strength >= 2 && best.direction !== 'neutral') {
-            direction   = best.direction as 'long' | 'short';
-            signalType  = best.type as SignalType;
+            direction    = best.direction as 'long' | 'short';
+            signalType   = best.type as SignalType;
             signalDetail = best.description;
-            confidence  = best.strength >= 4 ? 'high' : best.strength === 3 ? 'medium' : 'low';
-            stopPrice   = best.stopZone.price || last.close * (1 - profile.stopPercent / 100);
-            targetPrice = best.targetZone.price;
+            confidence   = best.strength >= 4 ? 'high' : best.strength === 3 ? 'medium' : 'low';
+            stopPrice    = best.stopZone.price || last.close * (1 - profile.stopPercent / 100);
+            targetPrice  = best.targetZone.price;
         }
     }
 
-    // Momentum fallback — if no pattern, use simple trend continuation
-    if (!signalType) {
-        if (candles15m.length >= 5) {
-            const prev5 = candles15m[candles15m.length - 5];
-            const move = (last.close - prev5.close) / prev5.close * 100;
-            if (Math.abs(move) >= 0.8) { // at least 0.8% move in 5 candles
-                direction  = move > 0 ? 'long' : 'short';
-                signalType = 'trend_continuation';
-                signalDetail = `${move > 0 ? 'Bullish' : 'Bearish'} momentum ${Math.abs(move).toFixed(2)}% over 5 candles`;
-                confidence = Math.abs(move) >= 1.5 ? 'medium' : 'low';
-                stopPrice  = direction === 'long'
-                    ? last.close * (1 - profile.stopPercent / 100)
-                    : last.close * (1 + profile.stopPercent / 100);
-            }
+    // Momentum fallback — 1.5% move over last 5 candles
+    if (!signalType && candles15m.length >= 5) {
+        const prev5 = candles15m[candles15m.length - 5];
+        const move  = (last.close - prev5.close) / prev5.close * 100;
+        if (Math.abs(move) >= 1.5) {
+            direction    = move > 0 ? 'long' : 'short';
+            signalType   = 'trend_continuation';
+            signalDetail = `${move > 0 ? 'Bullish' : 'Bearish'} momentum ${Math.abs(move).toFixed(2)}% over 5 candles`;
+            confidence   = Math.abs(move) >= 2.5 ? 'high' : 'medium';
+            stopPrice    = direction === 'long'
+                ? last.close * (1 - profile.stopPercent / 100)
+                : last.close * (1 + profile.stopPercent / 100);
         }
     }
 
     if (!signalType || !direction) return null;
 
-    // ── Nifty trend filter — only block low-confidence counter-trend entries ──
-    if (trend === 'up'   && direction === 'short' && confidence === 'low') return null;
-    if (trend === 'down' && direction === 'long'  && confidence === 'low') return null;
+    // Trend filter — don't fight Nifty unless high confidence
+    if (trend === 'up'   && direction === 'short' && confidence !== 'high') return null;
+    if (trend === 'down' && direction === 'long'  && confidence !== 'high') return null;
 
     // ── Price levels ──────────────────────────────────────────────────────────
     const rawEntryPrice = last.close;
