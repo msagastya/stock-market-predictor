@@ -7,6 +7,10 @@ on:
         description: 'Period: 6m, 1y, or 3y'
         required: true
         default: '6m'
+      action:
+        description: 'Action: run (default) or merge-only'
+        required: false
+        default: 'run'
 
 jobs:
   backtest:
@@ -16,9 +20,29 @@ jobs:
       APP_URL: ${{ secrets.VERCEL_APP_URL }}
       TRADING_SECRET: ${{ secrets.TRADING_SECRET }}
       PERIOD: ${{ github.event.inputs.period }}
+      ACTION: ${{ github.event.inputs.action }}
     steps:
       - name: Run backtest
         run: |
+          call_api() {
+            curl -s --max-time 290 -X POST "$1" -H "x-trading-secret: ${TRADING_SECRET}" \
+              | python3 -c "
+import sys,json
+try:
+  d=json.load(sys.stdin)
+  keys=['chunk','tradingDays','totalTrades','winRate','totalPnL','message']
+  for k in keys:
+    if k in d: print(f'  {k}={d[k]}')
+except Exception as e: print(f'  error: {e}')
+"
+          }
+
+          if [ "$ACTION" = "merge-only" ]; then
+            echo "=== Merge only: ${PERIOD} ==="
+            call_api "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=merge"
+            exit 0
+          fi
+
           if [ "$PERIOD" = "6m" ]; then
             CHUNKS=1
           elif [ "$PERIOD" = "1y" ]; then
@@ -28,33 +52,14 @@ jobs:
           fi
 
           if [ "$CHUNKS" = "1" ]; then
-            echo "Running ${PERIOD} single-shot..."
-            curl -s -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}" \
-              -H "x-trading-secret: ${TRADING_SECRET}" | python3 -m json.tool
+            echo "=== Running ${PERIOD} (single shot) ==="
+            call_api "${APP_URL}/api/trading/backtest?period=${PERIOD}"
           else
             for i in $(seq 1 $CHUNKS); do
               echo "=== Chunk $i / $CHUNKS ==="
-              curl -s -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=${i}" \
-                -H "x-trading-secret: ${TRADING_SECRET}" | python3 -c "
-import sys,json
-try:
-  d=json.load(sys.stdin)
-  print(f'  days={d.get(\"tradingDays\")} trades={d.get(\"totalTrades\")} pnl={d.get(\"totalPnL\")} msg={d.get(\"message\",\"\")[:60]}')
-except: print('  parse error')
-"
+              call_api "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=${i}"
               sleep 35
             done
-            echo "=== Merging all ${CHUNKS} chunks ==="
-            curl -s -X POST "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=merge" \
-              -H "x-trading-secret: ${TRADING_SECRET}" | python3 -c "
-import sys,json
-try:
-  d=json.load(sys.stdin)
-  print('FINAL RESULT:')
-  print(f'  Period={d.get(\"period\")} Days={d.get(\"tradingDays\")} Trades={d.get(\"totalTrades\")} WinRate={d.get(\"winRate\")}% PnL={d.get(\"totalPnL\")}')
-  print('Top conditions (best win rates):')
-  for c in (d.get('topStocks') or [])[:5]:
-    print(f'  {c}')
-except Exception as e: print(f'  merge parse error: {e}')
-"
+            echo "=== Merging ==="
+            call_api "${APP_URL}/api/trading/backtest?period=${PERIOD}&chunk=merge"
           fi
