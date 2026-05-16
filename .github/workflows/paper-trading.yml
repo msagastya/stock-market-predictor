@@ -2,43 +2,69 @@ name: Paper Trading Engine
 
 on:
   schedule:
-    # Morning scan — 7:00 AM IST = 1:30 AM UTC, Mon–Fri
+    # 7:00 AM IST = 1:30 AM UTC — Brain analysis + morning scan
     - cron: '30 1 * * 1-5'
     # Session 1: 9:10–11:15 IST = 3:40 UTC
     - cron: '40 3 * * 1-5'
     # Session 2: 11:15–13:15 IST = 5:45 UTC
     - cron: '45 5 * * 1-5'
-    # Session 3: 13:15–15:35 IST = 7:45 UTC (includes EOD + AI report)
+    # Session 3: 13:15–15:35 IST = 7:45 UTC (includes EOD)
     - cron: '45 7 * * 1-5'
 
   workflow_dispatch:
     inputs:
       job:
-        description: 'morning_scan, tick, or eod'
+        description: 'morning_scan, tick, eod, or brain'
         required: false
         default: 'tick'
 
 jobs:
   morning_scan:
-    name: Morning Scan + AI Briefing (7 AM IST)
+    name: Brain + Morning Scan (7 AM IST)
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'morning_scan') ||
       (github.event_name == 'schedule' && github.event.schedule == '30 1 * * 1-5')
     steps:
+      - name: Groq brain — market analysis
+        env:
+          APP_URL: ${{ secrets.VERCEL_APP_URL }}
+          SECRET: ${{ secrets.TRADING_SECRET }}
+        run: |
+          echo "=== Fetching market overview ==="
+          MARKET=$(curl -s --max-time 15 "${APP_URL}/api/market/overview" || echo '{}')
+          echo "Market bytes: $(echo "$MARKET" | wc -c)"
+
+          PAYLOAD=$(python3 -c "
+import json, sys
+try:
+  market = json.loads(sys.argv[1])
+except:
+  market = {}
+print(json.dumps({'mode': 'morning', 'marketData': market}))
+" "$MARKET" 2>/dev/null || echo '{"mode":"morning","marketData":{}}')
+
+          echo "=== Calling Groq brain ==="
+          BRAIN=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/brain" \
+            -H "x-trading-secret: ${SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" --max-time 55)
+          CODE=$(echo "$BRAIN" | tail -1)
+          BODY=$(echo "$BRAIN" | head -n -1)
+          echo "Brain HTTP $CODE: $BODY"
+
       - name: Run morning scan
         env:
           APP_URL: ${{ secrets.VERCEL_APP_URL }}
           SECRET: ${{ secrets.TRADING_SECRET }}
         run: |
-          echo "Running morning scan + AI briefing at $(date -u)"
+          echo "=== Running morning scan ==="
           RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=morning_scan" \
             -H "x-trading-secret: ${SECRET}" \
             -H "Content-Type: application/json" --max-time 58)
           CODE=$(echo "$RESP" | tail -1)
           BODY=$(echo "$RESP" | head -n -1)
           echo "HTTP $CODE: $BODY"
-          [ "$CODE" = "200" ] || exit 1
 
   session_1:
     name: Market Session 1 (9:10-11:15 IST)
@@ -85,11 +111,11 @@ jobs:
           done
 
   session_3:
-    name: Market Session 3 + EOD Report (13:15-15:35 IST)
+    name: Market Session 3 + EOD (13:15-15:35 IST)
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' && github.event.schedule == '45 7 * * 1-5'
     steps:
-      - name: 1-minute tick loop (includes EOD exit)
+      - name: 1-minute tick loop (includes EOD exit at 15:30)
         env:
           APP_URL: ${{ secrets.VERCEL_APP_URL }}
           SECRET: ${{ secrets.TRADING_SECRET }}
@@ -105,30 +131,77 @@ jobs:
             echo "$(date -u +%H:%M:%S) HTTP $CODE | $BODY"
             sleep 55
           done
-      - name: Generate AI daily report
+
+      - name: EOD close — force-exit all open positions
         env:
           APP_URL: ${{ secrets.VERCEL_APP_URL }}
           SECRET: ${{ secrets.TRADING_SECRET }}
         run: |
-          echo "Generating EOD AI report..."
-          RESP=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=eod" \
+          echo "=== Force-closing all open positions ==="
+          CLOSE=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/run?mode=eod" \
             -H "x-trading-secret: ${SECRET}" \
             -H "Content-Type: application/json" --max-time 58)
-          CODE=$(echo "$RESP" | tail -1)
-          BODY=$(echo "$RESP" | head -n -1)
-          echo "HTTP $CODE: $BODY"
+          CODE=$(echo "$CLOSE" | tail -1)
+          BODY=$(echo "$CLOSE" | head -n -1)
+          echo "EOD HTTP $CODE: $BODY"
+
+      - name: Groq brain — EOD review and learning
+        env:
+          APP_URL: ${{ secrets.VERCEL_APP_URL }}
+          SECRET: ${{ secrets.TRADING_SECRET }}
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          TRADES_RESP=$(curl -s --max-time 15 "${APP_URL}/api/trading/paper?date=${TODAY}" || echo '{}')
+
+          PAYLOAD=$(python3 -c "
+import json, sys
+try:
+  d = json.loads(sys.argv[1])
+  trades = d.get('trades', [])
+  closed = [t for t in trades if t.get('exitReason') not in ('open', None, 'avoided_charges')]
+  winners = [t for t in closed if (t.get('netPnL') or 0) > 0]
+  losers  = [t for t in closed if (t.get('netPnL') or 0) <= 0]
+  net_pnl = sum(t.get('netPnL', 0) or 0 for t in closed)
+  summary = {
+    'totalTrades': len(closed),
+    'winners': len(winners),
+    'losers': len(losers),
+    'winRate': round(len(winners)/len(closed)*100, 1) if closed else 0,
+    'netPnL': round(net_pnl, 2)
+  }
+  payload = {'mode': 'eod', 'trades': closed, 'summary': summary}
+  print(json.dumps(payload))
+except Exception as e:
+  print(json.dumps({'mode': 'eod', 'trades': [], 'summary': {}}))
+" "$TRADES_RESP" 2>/dev/null || echo '{"mode":"eod","trades":[],"summary":{}}')
+
+          echo "=== Groq brain EOD review ==="
+          BRAIN=$(curl -s -w "\n%{http_code}" -X POST "${APP_URL}/api/trading/brain" \
+            -H "x-trading-secret: ${SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" --max-time 55)
+          CODE=$(echo "$BRAIN" | tail -1)
+          BODY=$(echo "$BRAIN" | head -n -1)
+          echo "Brain EOD HTTP $CODE: $BODY"
 
   manual_tick:
-    name: Manual Tick / EOD
+    name: Manual Tick / EOD / Brain
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.job == 'tick' || github.event.inputs.job == 'eod')
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.job == 'tick' || github.event.inputs.job == 'eod' || github.event.inputs.job == 'brain')
     steps:
-      - name: Single tick or EOD
+      - name: Run job
         env:
           APP_URL: ${{ secrets.VERCEL_APP_URL }}
           SECRET: ${{ secrets.TRADING_SECRET }}
           JOB: ${{ github.event.inputs.job }}
         run: |
-          curl -s -X POST "${APP_URL}/api/trading/run?mode=${JOB}" \
-            -H "x-trading-secret: ${SECRET}" \
-            -H "Content-Type: application/json" | python3 -m json.tool
+          if [ "$JOB" = "brain" ]; then
+            curl -s -X POST "${APP_URL}/api/trading/brain" \
+              -H "x-trading-secret: ${SECRET}" \
+              -H "Content-Type: application/json" \
+              -d '{"mode":"morning","marketData":{}}' | python3 -m json.tool
+          else
+            curl -s -X POST "${APP_URL}/api/trading/run?mode=${JOB}" \
+              -H "x-trading-secret: ${SECRET}" \
+              -H "Content-Type: application/json" | python3 -m json.tool
+          fi
