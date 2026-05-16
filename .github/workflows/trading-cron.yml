@@ -2,10 +2,12 @@ name: Autonomous Trading
 
 on:
   schedule:
-    # 9:15 AM IST = 3:45 AM UTC, Monday-Friday
+    # 7:00 AM IST = 1:30 AM UTC — Brain morning analysis
+    - cron: '30 1 * * 1-5'
+    # 9:15 AM IST = 3:45 AM UTC — Market open, execute trades
     - cron: '45 3 * * 1-5'
-    # 3:15 PM IST = 9:45 AM UTC, Monday-Friday (intraday exit)
-    - cron: '45 9 * * 1-5'
+    # 3:20 PM IST = 9:50 AM UTC — EOD close + brain review
+    - cron: '50 9 * * 1-5'
   workflow_dispatch:
     inputs:
       action:
@@ -15,8 +17,10 @@ on:
         type: choice
         options:
           - preview
+          - brain-morning
           - trade
           - exit
+          - brain-eod
 
 jobs:
   trade:
@@ -24,34 +28,107 @@ jobs:
     steps:
       - name: Determine action
         id: action
+        env:
+          INPUT_ACTION: ${{ github.event.inputs.action }}
         run: |
           HOUR=$(date -u +%H)
-          MINUTE=$(date -u +%M)
-          INPUT="${{ github.event.inputs.action }}"
 
-          if [ "$INPUT" = "preview" ]; then
-            echo "endpoint=/api/trading/run" >> $GITHUB_OUTPUT
-            echo "method=GET" >> $GITHUB_OUTPUT
-          elif [ "$INPUT" = "exit" ]; then
-            echo "endpoint=/api/trading/intraday-exit" >> $GITHUB_OUTPUT
-            echo "method=POST" >> $GITHUB_OUTPUT
-          elif [ "$INPUT" = "trade" ]; then
-            echo "endpoint=/api/trading/run" >> $GITHUB_OUTPUT
-            echo "method=POST" >> $GITHUB_OUTPUT
-          elif [ "$HOUR" = "03" ]; then
-            echo "endpoint=/api/trading/run" >> $GITHUB_OUTPUT
-            echo "method=POST" >> $GITHUB_OUTPUT
-          elif [ "$HOUR" = "09" ]; then
-            echo "endpoint=/api/trading/intraday-exit" >> $GITHUB_OUTPUT
-            echo "method=POST" >> $GITHUB_OUTPUT
+          if   [ "$INPUT_ACTION" = "preview" ];       then ACTION="preview"
+          elif [ "$INPUT_ACTION" = "brain-morning" ]; then ACTION="brain-morning"
+          elif [ "$INPUT_ACTION" = "trade" ];         then ACTION="trade"
+          elif [ "$INPUT_ACTION" = "exit" ];          then ACTION="exit"
+          elif [ "$INPUT_ACTION" = "brain-eod" ];     then ACTION="brain-eod"
+          elif [ "$HOUR" = "01" ];                    then ACTION="brain-morning"
+          elif [ "$HOUR" = "03" ];                    then ACTION="trade"
+          elif [ "$HOUR" = "09" ];                    then ACTION="exit"
+          else                                             ACTION="preview"
           fi
 
-      - name: Run trading action
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+
+      - name: Brain morning analysis
+        if: steps.action.outputs.action == 'brain-morning'
         run: |
-          RESPONSE=$(curl -s -X ${{ steps.action.outputs.method }} \
+          echo "=== Fetching market snapshot ==="
+          MARKET=$(curl -s "${{ secrets.VERCEL_APP_URL }}/api/market/overview" || echo '{}')
+          echo "Market data fetched ($(echo "$MARKET" | wc -c) bytes)"
+
+          echo "=== Calling brain (Groq) ==="
+          PAYLOAD=$(python3 -c "
+          import json, sys
+          market = json.loads(sys.argv[1]) if sys.argv[1] != '{}' else {}
+          print(json.dumps({'mode': 'morning', 'marketData': market}))
+          " "$MARKET" 2>/dev/null || echo '{"mode":"morning","marketData":{}}')
+
+          RESPONSE=$(curl -s -X POST \
+            -H "x-trading-secret: ${{ secrets.TRADING_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            --max-time 55 \
+            "${{ secrets.VERCEL_APP_URL }}/api/trading/brain")
+          echo "Brain response: $RESPONSE"
+          echo "$RESPONSE" | python3 -m json.tool || true
+
+      - name: Execute trades
+        if: steps.action.outputs.action == 'trade'
+        run: |
+          RESPONSE=$(curl -s -X POST \
             -H "x-trading-secret: ${{ secrets.TRADING_SECRET }}" \
             -H "Content-Type: application/json" \
             -d '{}' \
-            "${{ secrets.VERCEL_APP_URL }}${{ steps.action.outputs.endpoint }}")
-          echo "Response: $RESPONSE"
+            --max-time 55 \
+            "${{ secrets.VERCEL_APP_URL }}/api/trading/run")
+          echo "Trade response: $RESPONSE"
+          echo "$RESPONSE" | python3 -m json.tool || true
+
+      - name: Close positions and EOD brain review
+        if: steps.action.outputs.action == 'exit'
+        run: |
+          CLOSE=$(curl -s -X POST \
+            -H "x-trading-secret: ${{ secrets.TRADING_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --max-time 55 \
+            "${{ secrets.VERCEL_APP_URL }}/api/trading/intraday-exit")
+          echo "Close response: $CLOSE"
+          echo "$CLOSE" | python3 -m json.tool || true
+
+          PAYLOAD=$(python3 -c "
+          import json, sys
+          d = json.loads(sys.argv[1])
+          payload = {
+            'mode': 'eod',
+            'trades': d.get('trades', []),
+            'summary': d.get('summary', {})
+          }
+          print(json.dumps(payload))
+          " "$CLOSE" 2>/dev/null || echo '{"mode":"eod","trades":[],"summary":{}}')
+
+          echo "=== Brain EOD review ==="
+          BRAIN=$(curl -s -X POST \
+            -H "x-trading-secret: ${{ secrets.TRADING_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            --max-time 55 \
+            "${{ secrets.VERCEL_APP_URL }}/api/trading/brain")
+          echo "Brain EOD: $BRAIN"
+          echo "$BRAIN" | python3 -m json.tool || true
+
+      - name: Preview signals
+        if: steps.action.outputs.action == 'preview'
+        run: |
+          RESPONSE=$(curl -s "${{ secrets.VERCEL_APP_URL }}/api/trading/run")
+          echo "Preview: $RESPONSE"
+          echo "$RESPONSE" | python3 -m json.tool || true
+
+      - name: Manual brain EOD
+        if: steps.action.outputs.action == 'brain-eod'
+        run: |
+          RESPONSE=$(curl -s -X POST \
+            -H "x-trading-secret: ${{ secrets.TRADING_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"mode":"eod","trades":[],"summary":{}}' \
+            --max-time 55 \
+            "${{ secrets.VERCEL_APP_URL }}/api/trading/brain")
+          echo "Brain EOD: $RESPONSE"
           echo "$RESPONSE" | python3 -m json.tool || true
